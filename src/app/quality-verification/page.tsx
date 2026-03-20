@@ -1,48 +1,132 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useProducts, Product } from "@/lib/use-products";
 import {
     CheckCircle2,
     XCircle,
-    Package,
-    ShieldCheck,
     Clock,
-    Calendar,
+    Package,
 } from "lucide-react";
 
-export default function QualityVerificationPage() {
+const statusConfig: Record<string, { label: string; color: string; icon: React.ElementType; badge: string }> = {
+    pending: { label: "Pending", color: "text-orange-600", icon: Clock, badge: "bg-orange-50 text-orange-700 border-orange-200" },
+    approved: { label: "Approved", color: "text-emerald-600", icon: CheckCircle2, badge: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    rejected: { label: "Rejected", color: "text-red-600", icon: XCircle, badge: "bg-red-50 text-red-700 border-red-200" },
+};
+
+// Define fields outside component to avoid recreation
+const FIELDS = [
+    { key: "customer", label: "Customer Name" },
+    { key: "vendorCode", label: "Vendor Code" },
+    { key: "poNumber", label: "PO Number" },
+    { key: "supplyDate", label: "Supply Date" },
+    { key: "sampleStatus", label: "Sample Status" },
+    { key: "sampleSupplyMode", label: "Sample Supply Mode" },
+    { key: "acceptedMailDate", label: "Accepted Mail Date" },
+    { key: "trsoDate", label: "TRSO Date" },
+    { key: "trsoModel", label: "TRSO Model" },
+    { key: "trsoRev", label: "TRSO Rev" },
+    { key: "iqaDate", label: "IQA Date" },
+    { key: "iqaModel", label: "IQA Model" },
+    { key: "iqaVcNumber", label: "IQA VC Number" },
+    { key: "ppapIntimateDate", label: "PPAP Intimate Date" },
+    { key: "ppapClosingDate", label: "PPAP Closing Date" },
+    { key: "ppapStatus", label: "PPAP Status" },
+    { key: "revNo", label: "Rev No" },
+    { key: "drawingNumber", label: "Drawing Number" },
+    { key: "drawingModel", label: "Drawing Model" },
+    { key: "vehicleType", label: "Vehicle Type" },
+    { key: "partNumber", label: "Part No." },
+    { key: "partDescription", label: "Part Description" },
+    { key: "partWeightKg", label: "Part Weight in kg" },
+];
+
+export default function ApprovalsPage() {
     const { products, updateProduct, isLoaded } = useProducts();
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+    const [reviewedFields, setReviewedFields] = useState<Set<string>>(new Set());
 
-    const getStatus = (status?: string) => {
+    const getStatus = useCallback((status?: string) => {
         const s = status?.toLowerCase() || "pending";
         return ["pending", "verified", "approved", "rejected"].includes(s) ? s : "pending";
-    };
+    }, []);
 
-    const handleAction = (product: Product, newStatus: string) => {
+    const handleAction = useCallback((product: Product, newStatus: string) => {
         updateProduct(product.id, { status: newStatus });
         if (selectedProduct?.id === product.id) {
-            setSelectedProduct(null); // Close modal on action
+            setSelectedProduct(null);
+            setReviewedFields(new Set());
         }
-    };
+    }, [updateProduct, selectedProduct]);
 
-    if (!isLoaded) return <DashboardLayout><div className="p-8 text-center text-muted-foreground">Loading...</div></DashboardLayout>;
+    const handleFieldClick = useCallback((key: string) => {
+        setReviewedFields(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+            }
+            return next;
+        });
+    }, []);
+
+    const handleCloseDialog = useCallback(() => {
+        setSelectedProduct(null);
+        setReviewedFields(new Set());
+    }, []);
+
+    // Memoize stats to avoid recalculation on every render
+    const stats = useMemo(() => {
+        const pending = products.filter(p => getStatus(p.status) === "pending").length;
+        const approved = products.filter(p => getStatus(p.status) === "approved").length;
+        const rejected = products.filter(p => getStatus(p.status) === "rejected").length;
+        
+        return [
+            { label: "Pending", count: pending, color: "text-orange-600", bg: "bg-orange-50" },
+            { label: "Approved", count: approved, color: "text-emerald-600", bg: "bg-emerald-50" },
+            { label: "Rejected", count: rejected, color: "text-red-600", bg: "bg-red-50" },
+        ];
+    }, [products, getStatus]);
+
+    if (!isLoaded) {
+        return (
+            <DashboardLayout>
+                <div className="p-8 text-center text-muted-foreground">Loading...</div>
+            </DashboardLayout>
+        );
+    }
 
     return (
         <DashboardLayout>
             <div className="space-y-6">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight">Quality Verification</h1>
-                    <p className="text-sm text-muted-foreground mt-1">Review and approve production quality reports</p>
+                    <h1 className="text-2xl font-bold tracking-tight">Approval Workflow</h1>
+                    <p className="text-sm text-muted-foreground mt-1">Review and manage product approval queue</p>
                 </div>
 
+                {/* Stats */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    {stats.map((stat) => (
+                        <Card key={stat.label} className="border-0 shadow-sm">
+                            <CardContent className="p-4 flex items-center gap-3">
+                                <div className={`w-10 h-10 rounded-xl ${stat.bg} flex items-center justify-center`}>
+                                    <span className={`text-lg font-bold ${stat.color}`}>{stat.count}</span>
+                                </div>
+                                <span className="text-sm font-medium text-muted-foreground">{stat.label}</span>
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+
+                {/* Tabs */}
                 <Tabs defaultValue="pending" className="space-y-4">
                     <TabsList className="bg-muted/50 h-9">
                         <TabsTrigger value="pending" className="text-xs data-[state=active]:shadow-sm">Pending</TabsTrigger>
@@ -52,36 +136,42 @@ export default function QualityVerificationPage() {
 
                     {(["pending", "approved", "rejected"] as const).map((status) => {
                         const filtered = products.filter(p => getStatus(p.status) === status);
+                        const config = statusConfig[status];
+                        
                         return (
                             <TabsContent key={status} value={status}>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                                     {filtered.map((product) => {
-                                        const s = getStatus(product.status);
-                                        const isPending = s === "pending";
-                                        const isApproved = s === "approved";
-                                        const isRejected = s === "rejected";
-                                        const isVerified = s === "verified";
+                                        const Icon = config.icon;
                                         return (
-                                            <Card key={product.id} className="border-0 shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => setSelectedProduct(product)}>
-                                                <CardContent className="p-4">
-                                                    <div className="flex items-center justify-between">
+                                            <Card 
+                                                key={product.id} 
+                                                className="border-0 shadow-sm hover:shadow-md transition-all duration-300 group overflow-hidden cursor-pointer"
+                                                onClick={() => {
+                                                    setSelectedProduct(product);
+                                                    setReviewedFields(new Set());
+                                                }}
+                                            >
+                                                <CardContent className="p-5">
+                                                    <div className="flex items-start justify-between mb-4">
                                                         <div className="flex items-center gap-3">
                                                             <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center group-hover:bg-primary/10 transition-colors">
                                                                 <Package className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
                                                             </div>
                                                             <div>
                                                                 <h3 className="text-sm font-semibold font-mono">{product.partNumber}</h3>
-                                                                <p className="text-xs text-muted-foreground truncate max-w-[120px]">{product.customer}</p>
+                                                                <p className="text-xs text-muted-foreground">{product.customer}</p>
                                                             </div>
                                                         </div>
-                                                        {isPending && <Badge variant="outline" className="text-[10px] bg-orange-50 text-orange-700 border-orange-200"><Clock className="w-3 h-3 mr-1"/>Pending</Badge>}
-                                                        {isApproved && <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200"><CheckCircle2 className="w-3 h-3 mr-1"/>Approved</Badge>}
-                                                        {isRejected && <Badge variant="outline" className="text-[10px] bg-red-50 text-red-700 border-red-200"><XCircle className="w-3 h-3 mr-1"/>Rejected</Badge>}
-                                                        {isVerified && <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200"><ShieldCheck className="w-3 h-3 mr-1"/>Verified</Badge>}
+                                                        <Badge variant="outline" className={`text-[10px] ${config.badge}`}>
+                                                            <Icon className="w-3 h-3 mr-1" />
+                                                            {config.label}
+                                                        </Badge>
                                                     </div>
-                                                    <div className="flex items-center gap-3 mt-4 pt-4 border-t border-border/30 text-xs text-muted-foreground">
-                                                        <Calendar className="w-3 h-3" />
-                                                        <span>Added Recently</span>
+                                                    <div className="grid grid-cols-2 gap-3 mb-4">
+                                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                            <span>Added Recently</span>
+                                                        </div>
                                                     </div>
                                                 </CardContent>
                                             </Card>
@@ -89,9 +179,11 @@ export default function QualityVerificationPage() {
                                     })}
                                 </div>
                                 {filtered.length === 0 && (
-                                    <div className="py-12 text-center border-2 border-dashed rounded-xl">
-                                        <p className="text-sm text-muted-foreground">No {status} products found.</p>
-                                    </div>
+                                    <Card className="border-0 shadow-sm">
+                                        <CardContent className="py-16 text-center">
+                                            <p className="text-sm text-muted-foreground">No {status} items</p>
+                                        </CardContent>
+                                    </Card>
                                 )}
                             </TabsContent>
                         );
@@ -99,58 +191,98 @@ export default function QualityVerificationPage() {
                 </Tabs>
             </div>
 
-            {/* Quality Details Popup */}
-            <Dialog open={!!selectedProduct} onOpenChange={(open) => !open && setSelectedProduct(null)}>
-                <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+            {/* Approval Details Popup */}
+            <Dialog open={!!selectedProduct} onOpenChange={(open) => !open && handleCloseDialog()}>
+                <DialogContent className="w-[95vw] !max-w-6xl h-[92vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>Quality Verification Details</DialogTitle>
+                        <DialogTitle className="text-lg font-semibold">Product Details for Approval</DialogTitle>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            Click each field to mark it as reviewed. All fields must be reviewed before approving.
+                        </p>
                     </DialogHeader>
-                    {selectedProduct && (
-                        <div className="space-y-6 mt-4">
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
-                                <div><span className="text-muted-foreground block text-xs">Tube Dia</span><span className="font-medium">{selectedProduct.tubeDiameter || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Series</span><span className="font-medium">{selectedProduct.series || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Tube Length</span><span className="font-medium">{selectedProduct.tubeLength || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Part Type</span><span className="font-medium">{selectedProduct.partType || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Noise Deadener length</span><span className="font-medium">{selectedProduct.noiseDeadenerLength || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Available Noise Deadener</span><span className="font-medium">{selectedProduct.availableNoiseDeadener || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Fep Press H. Stock Positions</span><span className="font-medium">{selectedProduct.fepPressHStockPositions || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Front End Piece Details</span><span className="font-medium">{selectedProduct.frontEndPieceDetails || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Rear Housing length</span><span className="font-medium">{selectedProduct.rearHousingLength || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Long Fork Length</span><span className="font-medium">{selectedProduct.longForkLength || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">S.F Details</span><span className="font-medium">{selectedProduct.sfDetails || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">PDC Length</span><span className="font-medium">{selectedProduct.pdcLength || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Coupling Flange Orientations</span><span className="font-medium">{selectedProduct.couplingFlangeOrientations || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Hex bolt/Nut Tightening torque</span><span className="font-medium">{selectedProduct.hexBoltNutTighteningTorque || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Loctite Grade Use</span><span className="font-medium">{selectedProduct.loctiteGradeUse || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">CB KIT Details</span><span className="font-medium">{selectedProduct.cbKitDetails || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Slip Details</span><span className="font-medium">{selectedProduct.slipDetails || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Greaseable Or Non Greaseable</span><span className="font-medium">{selectedProduct.greaseableOrNonGreaseable || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Mounting Details flange yoke</span><span className="font-medium">{selectedProduct.mountingDetailsFlangeYoke || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Mounting Details coupling flange</span><span className="font-medium">{selectedProduct.mountingDetailsCouplingFlange || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">I/A Bellow Details</span><span className="font-medium">{selectedProduct.iaBellowDetails || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Total Length</span><span className="font-medium">{selectedProduct.totalLength || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Balancing RPM</span><span className="font-medium">{selectedProduct.balancingRpm || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Unbalance In Cmg</span><span className="font-medium">{selectedProduct.unbalanceInCmg || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Unbalance In Gram</span><span className="font-medium">{selectedProduct.unbalanceInGram || "-"}</span></div>
-                                <div><span className="text-muted-foreground block text-xs">Unbalance In Gram 75%</span><span className="font-medium">{selectedProduct.unbalanceInGram75Percent || "-"}</span></div>
+
+                    {selectedProduct && (() => {
+                        const allReviewed = reviewedFields.size === FIELDS.length;
+                        const reviewedCount = reviewedFields.size;
+                        const currentStatus = getStatus(selectedProduct.status);
+
+                        return (
+                            <div className="space-y-5 mt-4">
+                                {/* Progress indicator */}
+                                <div className="flex items-center gap-3">
+                                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-emerald-500 rounded-full transition-all duration-150"
+                                            style={{ width: `${(reviewedCount / FIELDS.length) * 100}%` }}
+                                        />
+                                    </div>
+                                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                        {reviewedCount} / {FIELDS.length} reviewed
+                                    </span>
+                                </div>
+
+                                {/* Field grid */}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
+                                    {FIELDS.map(({ key, label }) => {
+                                        const isReviewed = reviewedFields.has(key);
+                                        const value = (selectedProduct as any)[key];
+                                        
+                                        return (
+                                            <div
+                                                key={key}
+                                                onClick={() => handleFieldClick(key)}
+                                                className={`relative cursor-pointer rounded-lg border-2 p-3 transition-all duration-100 select-none
+                                                    ${isReviewed
+                                                        ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
+                                                        : "border-border bg-card hover:border-muted-foreground/40 hover:bg-muted/40"
+                                                    }`}
+                                            >
+                                                {/* Checkmark badge */}
+                                                {isReviewed && (
+                                                    <span className="absolute top-2 right-2 text-emerald-600">
+                                                        <CheckCircle2 className="w-4 h-4" />
+                                                    </span>
+                                                )}
+                                                <span className="text-muted-foreground block text-xs mb-1 pr-5">{label}</span>
+                                                <span className={`font-medium text-sm break-words ${isReviewed ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
+                                                    {value || "-"}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Footer */}
+                                <DialogFooter className="flex flex-col sm:flex-row items-center gap-2 mt-6 pt-4 border-t">
+                                    {!allReviewed && (
+                                        <p className="text-xs text-amber-600 mr-auto">
+                                            ⚠ Review all {FIELDS.length - reviewedCount} remaining field(s) to enable approval.
+                                        </p>
+                                    )}
+                                    <Button variant="outline" onClick={handleCloseDialog}>
+                                        Cancel
+                                    </Button>
+                                    {currentStatus !== "approved" && (
+                                        <Button
+                                            className="bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                                            disabled={!allReviewed}
+                                            onClick={() => handleAction(selectedProduct, "Approved")}
+                                        >
+                                            <CheckCircle2 className="w-4 h-4 mr-2" /> Approve
+                                        </Button>
+                                    )}
+                                    {currentStatus !== "rejected" && (
+                                        <Button
+                                            variant="destructive"
+                                            onClick={() => handleAction(selectedProduct, "Rejected")}
+                                        >
+                                            <XCircle className="w-4 h-4 mr-2" /> Reject
+                                        </Button>
+                                    )}
+                                </DialogFooter>
                             </div>
-                            
-                            <DialogFooter className="flex items-center gap-2 mt-6 pt-4 border-t">
-                                <Button variant="outline" onClick={() => setSelectedProduct(null)}>Cancel</Button>
-                                {getStatus(selectedProduct.status) !== "approved" && (
-                                    <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handleAction(selectedProduct, "Approved")}>
-                                        <CheckCircle2 className="w-4 h-4 mr-2" /> Approve Quality
-                                    </Button>
-                                )}
-                                {getStatus(selectedProduct.status) !== "rejected" && (
-                                    <Button variant="destructive" onClick={() => handleAction(selectedProduct, "Rejected")}>
-                                        <XCircle className="w-4 h-4 mr-2" /> Reject Quality
-                                    </Button>
-                                )}
-                            </DialogFooter>
-                        </div>
-                    )}
+                        );
+                    })()}
                 </DialogContent>
             </Dialog>
         </DashboardLayout>

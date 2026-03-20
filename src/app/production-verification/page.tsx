@@ -11,6 +11,13 @@ import { QRScanner } from "@/components/qr-scanner";
 import { ScanLine, X, Search, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 interface ValidationHistory {
     id: number;
     customerName: string;
@@ -25,6 +32,14 @@ interface ValidationHistory {
     createdBy: string;
     date: Date;
 }
+
+const CUSTOMER_OPTIONS = ["ALL ALW", "ALL PNR", "ALL HUSUR", "TML", "VECV", "SWITCH MOBILITY", "IPLT"];
+const PRODUCT_TYPE_OPTIONS = ["COMPONENT", "DUMB", "FRONT", "I/A", "INTEGRATED", "MIDDLE", "NA", "REAR"];
+const TUBE_DIA_OPTIONS = ["0100X3.0", "100X4.5", "0101.577341", "0103.9X4.3", "ZEXP110", "0113.4X5.2", "0120X3", "120X4", "0120x6"];
+const C_FLANGE_ORIENTATION_OPTIONS = ["0", "90 degree", "N/A"];
+const COUPLING_FLANGE_OPTIONS = ["C/F 120 DIA 4 HOLES", "C/F 130 DIA & HOLES", "C/F 150 DIA 4 HOLES", "C/P 150 DIA ROUND 4 HOLES", "C/P 100 DIA 4 HOLES", "COUPLING YOKE", "NA", "21 SLEEVE YOKE"];
+const JOINT_TYPE_OPTIONS = ["135IT", "14K", "225/7", "325HS", "3251T", "325M", "403 JT", "490 L TML", "7061", "490/A TML", "7064", "7062 TML", "585/T", "4901T TML", "450M 7066 TML", "590H 7065 TML", "5901T TML"];
+const FLANGE_YOKE_OPTIONS = ["F/Y 120 DIA 4 HOLES", "F/Y 130 DIA BHOLES", "F/Y 150 DIA 4 LES", "F/Y 180 DIA 4 HOLES", "F/Y IA 150 DIA & HOLES", "F/YIA 180 DIA 4 HOLES", "PYO120 LF SIDE & FYO150 SF SIDE SERRAT", "FYD120 REP SIDE BL FYRISO SP-SP", "FHD120 HER SIDEFYDT50 SF-SF", "PYO150 LF SIDE & FVØ160 SF SIDE SERRATED", "FY180LF SIDE & FYD150 SF SIDE SERRATED"];
 
 export default function ProductionVerificationPage() {
     const { products, isLoaded } = useProducts();
@@ -181,15 +196,42 @@ export default function ProductionVerificationPage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                             <div className="flex items-center justify-between col-span-2">
                                 <Label className="w-1/3 text-muted-foreground">Customer Name</Label>
-                                <Input value={formCustomer} onChange={e => setFormCustomer(e.target.value)} className="h-9 w-2/3" />
+                                <Select value={formCustomer} onValueChange={(val) => val && setFormCustomer(val)}>
+                                    <SelectTrigger className="h-9 w-2/3">
+                                        <SelectValue placeholder="Select Customer" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {CUSTOMER_OPTIONS.map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div className="flex items-center justify-between col-span-2">
                                 <Label className="w-1/3 text-muted-foreground">Product Type</Label>
-                                <Input value={formProductType} onChange={e => setFormProductType(e.target.value)} className="h-9 w-2/3" />
+                                <Select value={formProductType} onValueChange={(val) => val && setFormProductType(val)}>
+                                    <SelectTrigger className="h-9 w-2/3">
+                                        <SelectValue placeholder="Select Product Type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {PRODUCT_TYPE_OPTIONS.map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div className="flex items-center justify-between col-span-2">
                                 <Label className="w-1/3 text-muted-foreground">Tube Dia & Thickness</Label>
-                                <Input value={formTubeDia} onChange={e => setFormTubeDia(e.target.value)} className="h-9 w-2/3" />
+                                <Select value={formTubeDia} onValueChange={(val) => val && setFormTubeDia(val)}>
+                                    <SelectTrigger className="h-9 w-2/3">
+                                        <SelectValue placeholder="Select Tube Dia" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {TUBE_DIA_OPTIONS.map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             
                             <div className="flex items-center justify-between">
@@ -198,21 +240,57 @@ export default function ProductionVerificationPage() {
                             </div>
                             <div className="flex items-center justify-between">
                                 <Label className="text-muted-foreground w-1/2 ml-4">Joint Type</Label>
-                                <Input value={formJointType} onChange={e => setFormJointType(e.target.value)} className="h-9 w-1/2" />
+                                <Select value={formJointType} onValueChange={(val) => val && setFormJointType(val)}>
+                                    <SelectTrigger className="h-9 w-1/2">
+                                        <SelectValue placeholder="Select Joint Type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {JOINT_TYPE_OPTIONS.map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
 
                             <div className="flex items-center justify-between">
                                 <Label className="text-muted-foreground w-1/2">C_Flange Orient</Label>
-                                <Input value={formCFlangeOrientation} onChange={e => setFormCFlangeOrientation(e.target.value)} className="h-9 w-1/2" />
+                                <Select value={formCFlangeOrientation} onValueChange={(val) => val && setFormCFlangeOrientation(val)}>
+                                    <SelectTrigger className="h-9 w-1/2">
+                                        <SelectValue placeholder="Select Orientation" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {C_FLANGE_ORIENTATION_OPTIONS.map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div className="flex items-center justify-between">
                                 <Label className="text-muted-foreground w-1/2 ml-4">Flange Yoke</Label>
-                                <Input value={formFlangeYoke} onChange={e => setFormFlangeYoke(e.target.value)} className="h-9 w-1/2" />
+                                <Select value={formFlangeYoke} onValueChange={(val) => val && setFormFlangeYoke(val)}>
+                                    <SelectTrigger className="h-9 w-1/2">
+                                        <SelectValue placeholder="Select F/Yoke" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {FLANGE_YOKE_OPTIONS.map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
 
                             <div className="flex items-center justify-between col-span-2 md:col-span-1">
                                 <Label className="text-muted-foreground w-1/2">Coupling Flange</Label>
-                                <Input value={formCouplingFlange} onChange={e => setFormCouplingFlange(e.target.value)} className="h-9 w-1/2" />
+                                <Select value={formCouplingFlange} onValueChange={(val) => val && setFormCouplingFlange(val)}>
+                                    <SelectTrigger className="h-9 w-1/2">
+                                        <SelectValue placeholder="Select Coupling" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {COUPLING_FLANGE_OPTIONS.map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div className="col-span-2 mt-2 flex justify-end">
                                 <Button onClick={handleCheck} className="min-w-[120px]">
