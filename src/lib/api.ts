@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'https://rsb-server.onrender.com/api',
+  baseURL: 'https://rsb-server-1.onrender.com/api',
   headers: {
     'Content-Type': 'application/json',
   },

@@ -52,7 +52,7 @@ const getFileUrl = (filePath: string) => {
     if (filePath.startsWith('http')) return filePath;
     // Otherwise replace backslashes (Windows) to forward slashes and prepend server base url
     const normalizedPath = filePath.replace(/\\/g, '/');
-    return `https://rsb-server.onrender.com/${normalizedPath}`;
+    return `https://rsb-server-1.onrender.com/${normalizedPath}`;
 };
 
 export default function ProductSpecificationsPage() {
