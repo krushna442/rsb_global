@@ -30,21 +30,26 @@ import {
     Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useProducts, Product } from "@/lib/use-products";
+import { useProducts } from "@/contexts/ProductsContext";
+import { Product } from "@/types/api";
 import { toast } from "sonner";
 
 interface ProductFormProps {
     isEdit?: boolean;
-    productId?: string | number;
+    productId?: number;
+    initialData?: Product | null;
+    isPopup?: boolean;
+    onSuccess?: () => void;
+    onCancel?: () => void;
 }
 
-export function ProductForm({ isEdit = false, productId }: ProductFormProps) {
+export function ProductForm({ isEdit = false, productId, initialData, isPopup = false, onSuccess, onCancel }: ProductFormProps) {
     const router = useRouter();
-    const { getProduct, addProduct, updateProduct, isLoaded } = useProducts();
+    const { createProduct, updateProduct, loading } = useProducts();
     const [isSubmitting, setIsSubmitting] = useState(false);
     
     // Form State
-    const [formData, setFormData] = useState<Partial<Product>>({
+    const [formData, setFormData] = useState<Record<string, any>>({
         partNumber: "",
         customer: "",
         vendorCode: "",
@@ -103,23 +108,22 @@ export function ProductForm({ isEdit = false, productId }: ProductFormProps) {
 
     // Load Data for Edit
     useEffect(() => {
-        if (isLoaded && isEdit && productId) {
-            const product = getProduct(productId);
-            if (product) {
-                setFormData(product);
-                if (product.documents) setFiles(product.documents);
-            } else {
-                toast.error("Product not found");
-                router.push("/product-master");
-            }
+        if (isEdit && initialData) {
+            setFormData({
+                partNumber: initialData.part_number || "",
+                customer: initialData.customer || "",
+                status: initialData.status || "Pending",
+                ...(initialData.specification || {})
+            });
+            // Optional: Handle initialData documents if available
         }
-    }, [isLoaded, isEdit, productId, getProduct, router]);
+    }, [isEdit, initialData]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
     };
 
-    const handleSelectChange = (key: keyof Product, value: string) => {
+    const handleSelectChange = (key: string, value: string) => {
         setFormData(prev => ({ ...prev, [key]: value }));
     };
 
@@ -150,17 +154,68 @@ export function ProductForm({ isEdit = false, productId }: ProductFormProps) {
 
         setIsSubmitting(true);
         try {
-            const finalData = { ...formData, documents: files };
-            
-            if (isEdit && productId) {
-                updateProduct(productId, finalData);
-                toast.success("Product updated successfully!");
+            if (isEdit && initialData && productId) {
+                const payload: any = {};
+                const specPayload: any = {};
+                let hasChanges = false;
+
+                const topLevelMap: Record<string, string> = {
+                    partNumber: 'part_number',
+                    customer: 'customer',
+                    status: 'status'
+                };
+
+                Object.keys(formData).forEach(key => {
+                    const newVal = (formData as any)[key];
+                    if (topLevelMap[key]) {
+                        const originalKey = topLevelMap[key];
+                        const oldVal = (initialData as any)[originalKey];
+                        if (newVal !== oldVal) {
+                            payload[originalKey] = newVal;
+                            hasChanges = true;
+                        }
+                    } else {
+                        const oldVal = initialData.specification?.[key];
+                        if (newVal !== oldVal) {
+                            specPayload[key] = newVal;
+                            hasChanges = true;
+                        }
+                    }
+                });
+
+                if (Object.keys(specPayload).length > 0) {
+                    payload.specification = specPayload;
+                }
+
+                if (!hasChanges) {
+                    toast.info("No changes to save.");
+                    if (onSuccess) onSuccess();
+                    return;
+                }
+
+                const success = await updateProduct(productId, payload);
+                if (success) {
+                    if (onSuccess) onSuccess();
+                    else router.push("/product-master");
+                }
             } else {
-                addProduct(finalData as Omit<Product, "id">);
-                toast.success("Product created successfully!");
+                // Create
+                const payload: any = {
+                    part_number: formData.partNumber,
+                    customer: formData.customer,
+                    status: formData.status,
+                    specification: { ...formData }
+                };
+                delete payload.specification.partNumber;
+                delete payload.specification.customer;
+                delete payload.specification.status;
+
+                const success = await createProduct(payload);
+                if (success) {
+                    if (onSuccess) onSuccess();
+                    else router.push("/product-master");
+                }
             }
-            
-            router.push("/product-master");
         } catch {
             toast.error("Failed to save product.");
         } finally {
@@ -168,11 +223,8 @@ export function ProductForm({ isEdit = false, productId }: ProductFormProps) {
         }
     };
 
-    if (!isLoaded) return <DashboardLayout><div className="p-8 text-center text-muted-foreground">Loading...</div></DashboardLayout>;
-
-    return (
-        <DashboardLayout>
-            <div className="space-y-6 max-w-4xl mx-auto pb-12">
+    const content = (
+        <div className="space-y-6 max-w-4xl mx-auto pb-12">
                 <form onSubmit={handleSubmit} className="space-y-6">
                     {/* Header */}
                     <div className="flex items-center justify-between">
@@ -192,11 +244,17 @@ export function ProductForm({ isEdit = false, productId }: ProductFormProps) {
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
-                            <Link href="/product-master">
-                                <Button type="button" variant="outline" size="sm" className="h-9 text-xs">
+                            {isPopup ? (
+                                <Button type="button" variant="outline" size="sm" onClick={onCancel} className="h-9 text-xs">
                                     Cancel
                                 </Button>
-                            </Link>
+                            ) : (
+                                <Link href="/product-master">
+                                    <Button type="button" variant="outline" size="sm" className="h-9 text-xs">
+                                        Cancel
+                                    </Button>
+                                </Link>
+                            )}
                             <Button type="submit" disabled={isSubmitting} size="sm" className="h-9 gap-1.5 text-xs">
                                 <Save className="w-3.5 h-3.5" />
                                 {isEdit ? "Save Changes" : "Save Product"}
@@ -833,11 +891,17 @@ export function ProductForm({ isEdit = false, productId }: ProductFormProps) {
 
                     {/* Actions */}
                     <div className="flex items-center justify-end gap-3 pb-6 sticky bottom-0 bg-background/90 backdrop-blur-md pt-4 z-10 border-t mt-8">
-                        <Link href="/product-master">
-                            <Button type="button" variant="outline" size="sm" className="h-9 text-xs">
+                        {isPopup ? (
+                            <Button type="button" variant="outline" size="sm" onClick={onCancel} className="h-9 text-xs">
                                 Cancel
                             </Button>
-                        </Link>
+                        ) : (
+                            <Link href="/product-master">
+                                <Button type="button" variant="outline" size="sm" className="h-9 text-xs">
+                                    Cancel
+                                </Button>
+                            </Link>
+                        )}
                         <Button type="submit" disabled={isSubmitting} size="sm" className="h-9 gap-1.5 text-xs">
                             <Save className="w-3.5 h-3.5" />
                             {isEdit ? "Save Changes" : "Save Product"}
@@ -845,6 +909,15 @@ export function ProductForm({ isEdit = false, productId }: ProductFormProps) {
                     </div>
                 </form>
             </div>
+    );
+
+    if (isPopup) {
+        return content;
+    }
+
+    return (
+        <DashboardLayout>
+            {content}
         </DashboardLayout>
     );
 }

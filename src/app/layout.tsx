@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
+import { AppProviders } from "@/contexts/AppProviders";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -11,7 +12,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "ManuVerify — Manufacturing Product Verification System",
+  title: "RSB Global",
   description: "Enterprise dashboard for product specifications, production verification, QR scanning, approvals, and document management.",
 };
 
@@ -23,9 +24,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} antialiased`}>
-        <TooltipProvider>
-          {children}
-        </TooltipProvider>
+        <AppProviders>
+          <TooltipProvider>
+            {children}
+          </TooltipProvider>
+        </AppProviders>
         <Toaster position="top-right" richColors />
       </body>
     </html>

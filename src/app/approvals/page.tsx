@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { useProducts, Product } from "@/lib/use-products";
+import { useProducts } from "@/contexts/ProductsContext";
+import { Product } from "@/types/api";
 import {
     CheckCircle2,
     XCircle,
@@ -49,7 +50,7 @@ const FIELDS = [
 ];
 
 export default function ApprovalsPage() {
-    const { products, updateProduct, isLoaded } = useProducts();
+    const { products, updateApproval, loading } = useProducts();
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
     const [reviewedFields, setReviewedFields] = useState<Set<string>>(new Set());
 
@@ -59,12 +60,12 @@ export default function ApprovalsPage() {
     }, []);
 
     const handleAction = useCallback((product: Product, newStatus: string) => {
-        updateProduct(product.id, { status: newStatus });
+        updateApproval(product.id, newStatus.toLowerCase() as any);
         if (selectedProduct?.id === product.id) {
             setSelectedProduct(null);
             setReviewedFields(new Set());
         }
-    }, [updateProduct, selectedProduct]);
+    }, [updateApproval, selectedProduct]);
 
     const handleFieldClick = useCallback((key: string) => {
         setReviewedFields(prev => {
@@ -85,9 +86,9 @@ export default function ApprovalsPage() {
 
     // Memoize stats to avoid recalculation on every render
     const stats = useMemo(() => {
-        const pending = products.filter(p => getStatus(p.status) === "pending").length;
-        const approved = products.filter(p => getStatus(p.status) === "approved").length;
-        const rejected = products.filter(p => getStatus(p.status) === "rejected").length;
+        const pending = products.filter(p => getStatus(p.approved) === "pending").length;
+        const approved = products.filter(p => getStatus(p.approved) === "approved").length;
+        const rejected = products.filter(p => getStatus(p.approved) === "rejected").length;
         
         return [
             { label: "Pending", count: pending, color: "text-orange-600", bg: "bg-orange-50" },
@@ -96,7 +97,7 @@ export default function ApprovalsPage() {
         ];
     }, [products, getStatus]);
 
-    if (!isLoaded) {
+    if (loading) {
         return (
             <DashboardLayout>
                 <div className="p-8 text-center text-muted-foreground">Loading...</div>
@@ -135,7 +136,7 @@ export default function ApprovalsPage() {
                     </TabsList>
 
                     {(["pending", "approved", "rejected"] as const).map((status) => {
-                        const filtered = products.filter(p => getStatus(p.status) === status);
+                        const filtered = products.filter(p => getStatus(p.approved) === status);
                         const config = statusConfig[status];
                         
                         return (
@@ -159,7 +160,7 @@ export default function ApprovalsPage() {
                                                                 <Package className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
                                                             </div>
                                                             <div>
-                                                                <h3 className="text-sm font-semibold font-mono">{product.partNumber}</h3>
+                                                                <h3 className="text-sm font-semibold font-mono">{product.part_number}</h3>
                                                                 <p className="text-xs text-muted-foreground">{product.customer}</p>
                                                             </div>
                                                         </div>
@@ -204,7 +205,7 @@ export default function ApprovalsPage() {
                     {selectedProduct && (() => {
                         const allReviewed = reviewedFields.size === FIELDS.length;
                         const reviewedCount = reviewedFields.size;
-                        const currentStatus = getStatus(selectedProduct.status);
+                        const currentStatus = getStatus(selectedProduct.approved);
 
                         return (
                             <div className="space-y-5 mt-4">
@@ -225,7 +226,7 @@ export default function ApprovalsPage() {
                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
                                     {FIELDS.map(({ key, label }) => {
                                         const isReviewed = reviewedFields.has(key);
-                                        const value = (selectedProduct as any)[key];
+                                        const value = (selectedProduct as any)[key] || selectedProduct?.specification?.[key];
                                         
                                         return (
                                             <div

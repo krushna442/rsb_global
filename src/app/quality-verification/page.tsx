@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { useProducts, Product } from "@/lib/use-products";
+import { useProducts } from "@/contexts/ProductsContext";
+import { useDynamicFields } from "@/contexts/DynamicFieldsContext";
+import { Product } from "@/types/api";
 import {
     CheckCircle2,
     XCircle,
@@ -21,37 +23,49 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.E
     rejected: { label: "Rejected", color: "text-red-600", icon: XCircle, badge: "bg-red-50 text-red-700 border-red-200" },
 };
 
-// Define fields outside component to avoid recreation
-const FIELDS = [
-    { key: "customer", label: "Customer Name" },
-    { key: "vendorCode", label: "Vendor Code" },
-    { key: "poNumber", label: "PO Number" },
-    { key: "supplyDate", label: "Supply Date" },
-    { key: "sampleStatus", label: "Sample Status" },
-    { key: "sampleSupplyMode", label: "Sample Supply Mode" },
-    { key: "acceptedMailDate", label: "Accepted Mail Date" },
-    { key: "trsoDate", label: "TRSO Date" },
-    { key: "trsoModel", label: "TRSO Model" },
-    { key: "trsoRev", label: "TRSO Rev" },
-    { key: "iqaDate", label: "IQA Date" },
-    { key: "iqaModel", label: "IQA Model" },
-    { key: "iqaVcNumber", label: "IQA VC Number" },
-    { key: "ppapIntimateDate", label: "PPAP Intimate Date" },
-    { key: "ppapClosingDate", label: "PPAP Closing Date" },
-    { key: "ppapStatus", label: "PPAP Status" },
-    { key: "revNo", label: "Rev No" },
-    { key: "drawingNumber", label: "Drawing Number" },
-    { key: "drawingModel", label: "Drawing Model" },
-    { key: "vehicleType", label: "Vehicle Type" },
-    { key: "partNumber", label: "Part No." },
-    { key: "partDescription", label: "Part Description" },
-    { key: "partWeightKg", label: "Part Weight in kg" },
-];
+// Map for known labes
+const FIELD_LABELS: Record<string, string> = {
+    customer: "Customer Name",
+    vendorCode: "Vendor Code",
+    poNumber: "PO Number",
+    supplyDate: "Supply Date",
+    sampleStatus: "Sample Status",
+    sampleSupplyMode: "Sample Supply Mode",
+    acceptedMailDate: "Accepted Mail Date",
+    trsoDate: "TRSO Date",
+    trsoModel: "TRSO Model",
+    trsoRev: "TRSO Rev",
+    iqaDate: "IQA Date",
+    iqaModel: "IQA Model",
+    iqaVcNumber: "IQA VC Number",
+    ppapIntimateDate: "PPAP Intimate Date",
+    ppapClosingDate: "PPAP Closing Date",
+    ppapStatus: "PPAP Status",
+    revNo: "Rev No",
+    drawingNumber: "Drawing Number",
+    drawingModel: "Drawing Model",
+    vehicleType: "Vehicle Type",
+    partNumber: "Part No.",
+    partDescription: "Part Description",
+    partWeightKg: "Part Weight in kg"
+};
+
+const formatLabel = (key: string) => {
+    if (FIELD_LABELS[key]) return FIELD_LABELS[key];
+    const split = key.replace(/([A-Z])/g, ' $1').trim();
+    return split.charAt(0).toUpperCase() + split.slice(1);
+};
 
 export default function ApprovalsPage() {
-    const { products, updateProduct, isLoaded } = useProducts();
+    const { products, updateQuality, loading } = useProducts();
+    const { data: dynamicData, loading: dynamicLoading } = useDynamicFields();
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
     const [reviewedFields, setReviewedFields] = useState<Set<string>>(new Set());
+
+    const activeFields = useMemo(() => {
+        const fields = dynamicData?.quality_verification_fields || [];
+        return fields.map(key => ({ key, label: formatLabel(key) }));
+    }, [dynamicData]);
 
     const getStatus = useCallback((status?: string) => {
         const s = status?.toLowerCase() || "pending";
@@ -59,12 +73,12 @@ export default function ApprovalsPage() {
     }, []);
 
     const handleAction = useCallback((product: Product, newStatus: string) => {
-        updateProduct(product.id, { status: newStatus });
+        updateQuality(product.id, newStatus.toLowerCase() as any);
         if (selectedProduct?.id === product.id) {
             setSelectedProduct(null);
             setReviewedFields(new Set());
         }
-    }, [updateProduct, selectedProduct]);
+    }, [updateQuality, selectedProduct]);
 
     const handleFieldClick = useCallback((key: string) => {
         setReviewedFields(prev => {
@@ -85,9 +99,9 @@ export default function ApprovalsPage() {
 
     // Memoize stats to avoid recalculation on every render
     const stats = useMemo(() => {
-        const pending = products.filter(p => getStatus(p.status) === "pending").length;
-        const approved = products.filter(p => getStatus(p.status) === "approved").length;
-        const rejected = products.filter(p => getStatus(p.status) === "rejected").length;
+        const pending = products.filter(p => getStatus(p.quality_verified) === "pending").length;
+        const approved = products.filter(p => getStatus(p.quality_verified) === "approved").length;
+        const rejected = products.filter(p => getStatus(p.quality_verified) === "rejected").length;
         
         return [
             { label: "Pending", count: pending, color: "text-orange-600", bg: "bg-orange-50" },
@@ -96,7 +110,7 @@ export default function ApprovalsPage() {
         ];
     }, [products, getStatus]);
 
-    if (!isLoaded) {
+    if (loading || dynamicLoading) {
         return (
             <DashboardLayout>
                 <div className="p-8 text-center text-muted-foreground">Loading...</div>
@@ -108,7 +122,7 @@ export default function ApprovalsPage() {
         <DashboardLayout>
             <div className="space-y-6">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight">Approval Workflow</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Quality Verification</h1>
                     <p className="text-sm text-muted-foreground mt-1">Review and manage product approval queue</p>
                 </div>
 
@@ -135,7 +149,7 @@ export default function ApprovalsPage() {
                     </TabsList>
 
                     {(["pending", "approved", "rejected"] as const).map((status) => {
-                        const filtered = products.filter(p => getStatus(p.status) === status);
+                        const filtered = products.filter(p => getStatus(p.quality_verified) === status);
                         const config = statusConfig[status];
                         
                         return (
@@ -159,7 +173,7 @@ export default function ApprovalsPage() {
                                                                 <Package className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
                                                             </div>
                                                             <div>
-                                                                <h3 className="text-sm font-semibold font-mono">{product.partNumber}</h3>
+                                                                <h3 className="text-sm font-semibold font-mono">{product.part_number}</h3>
                                                                 <p className="text-xs text-muted-foreground">{product.customer}</p>
                                                             </div>
                                                         </div>
@@ -202,9 +216,19 @@ export default function ApprovalsPage() {
                     </DialogHeader>
 
                     {selectedProduct && (() => {
-                        const allReviewed = reviewedFields.size === FIELDS.length;
-                        const reviewedCount = reviewedFields.size;
-                        const currentStatus = getStatus(selectedProduct.status);
+                        const editedFields = Array.isArray(selectedProduct.edited_fields) ? selectedProduct.edited_fields : [];
+                        const rawRequiredFields = editedFields.length > 0 
+                            ? activeFields.filter(f => editedFields.includes(f.key)) 
+                            : activeFields;
+                        
+                        // If there are edited fields but none of them are in activeFields, fallback to activeFields
+                        const requiredFields = rawRequiredFields.length > 0 ? rawRequiredFields : activeFields;
+                        
+                        const requiredCount = requiredFields.length;
+                        const reviewedRequiredCount = requiredFields.filter(f => reviewedFields.has(f.key)).length;
+                        
+                        const allReviewed = requiredCount === 0 || reviewedRequiredCount === requiredCount;
+                        const currentStatus = getStatus(selectedProduct.quality_verified);
 
                         return (
                             <div className="space-y-5 mt-4">
@@ -213,30 +237,40 @@ export default function ApprovalsPage() {
                                     <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                                         <div
                                             className="h-full bg-emerald-500 rounded-full transition-all duration-150"
-                                            style={{ width: `${(reviewedCount / FIELDS.length) * 100}%` }}
+                                            style={{ width: `${requiredCount > 0 ? (reviewedRequiredCount / requiredCount) * 100 : 100}%` }}
                                         />
                                     </div>
                                     <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                        {reviewedCount} / {FIELDS.length} reviewed
+                                        {reviewedRequiredCount} / {requiredCount} reviewed
                                     </span>
                                 </div>
 
                                 {/* Field grid */}
                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
-                                    {FIELDS.map(({ key, label }) => {
+                                    {activeFields.map(({ key, label }) => {
                                         const isReviewed = reviewedFields.has(key);
-                                        const value = (selectedProduct as any)[key];
+                                        const value = (selectedProduct as any)[key] || selectedProduct?.specification?.[key];
+                                        const isEdited = editedFields.includes(key);
+                                        const isRequired = requiredFields.some(f => f.key === key);
                                         
                                         return (
                                             <div
                                                 key={key}
-                                                onClick={() => handleFieldClick(key)}
-                                                className={`relative cursor-pointer rounded-lg border-2 p-3 transition-all duration-100 select-none
+                                                onClick={() => isRequired && handleFieldClick(key)}
+                                                className={`relative rounded-lg border-2 p-3 transition-all duration-100 select-none
+                                                    ${isRequired ? "cursor-pointer" : "opacity-60 cursor-not-allowed"}
+                                                    ${isEdited ? "ring-2 ring-amber-400 ring-offset-1 border-amber-200 bg-amber-50/30 dark:bg-amber-900/20" : ""}
                                                     ${isReviewed
                                                         ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
-                                                        : "border-border bg-card hover:border-muted-foreground/40 hover:bg-muted/40"
+                                                        : isRequired ? "border-border bg-card hover:border-muted-foreground/40 hover:bg-muted/40" : "border-transparent bg-muted/30"
                                                     }`}
                                             >
+                                                {/* Edit badge */}
+                                                {isEdited && (
+                                                    <span className="absolute -top-2 -left-2 bg-amber-400 text-amber-950 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm">
+                                                        EDITED
+                                                    </span>
+                                                )}
                                                 {/* Checkmark badge */}
                                                 {isReviewed && (
                                                     <span className="absolute top-2 right-2 text-emerald-600">
@@ -256,7 +290,7 @@ export default function ApprovalsPage() {
                                 <DialogFooter className="flex flex-col sm:flex-row items-center gap-2 mt-6 pt-4 border-t">
                                     {!allReviewed && (
                                         <p className="text-xs text-amber-600 mr-auto">
-                                            ⚠ Review all {FIELDS.length - reviewedCount} remaining field(s) to enable approval.
+                                            ⚠ Review all {requiredCount - reviewedRequiredCount} remaining field(s) to enable approval.
                                         </p>
                                     )}
                                     <Button variant="outline" onClick={handleCloseDialog}>

@@ -17,6 +17,7 @@ import {
     LogOut,
     Factory,
     Menu,
+    Sliders,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -29,6 +30,7 @@ const menuItems = [
     { label: "Documents", icon: FileText, href: "/documents" },
     { label: "Control Plan", icon: ListChecks, href: "/control-plan" },
     { label: "Product Specifications", icon: ClipboardCheck, href: "/product-specifications" },
+    { label: "Dynamic Fields", icon: Sliders, href: "/dynamic-fields" },
     { label: "Users", icon: Users, href: "/users" },
     { label: "Settings", icon: Settings, href: "/settings" },
 ];
@@ -49,8 +51,8 @@ export function MobileSidebar() {
                         <Factory className="w-4.5 h-4.5 text-white" />
                     </div>
                     <div className="flex flex-col">
-                        <span className="text-sm font-bold tracking-tight text-white">ManuVerify</span>
-                        <span className="text-[10px] text-sidebar-foreground/50 tracking-wide uppercase">Product Verification</span>
+                        <span className="text-sm font-bold tracking-tight text-white">RSB Global</span>
+                        <img src="/logo.png" alt="Logo" className="w-10 h-10" />
                     </div>
                 </div>
 

@@ -9,5 +9,5 @@ export default function EditProductPage() {
     
     if (!id) return null;
 
-    return <ProductForm isEdit productId={id} />;
+    return <ProductForm isEdit productId={Number(id)} />;
 }

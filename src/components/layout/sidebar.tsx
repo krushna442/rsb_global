@@ -17,6 +17,8 @@ import {
     Factory,
     ChevronLeft,
     ChevronRight,
+    Sliders,
+    BarChart3,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -29,6 +31,8 @@ const menuItems = [
     { label: "Documents", icon: FileText, href: "/documents" },
     { label: "Control Plan", icon: ListChecks, href: "/control-plan" },
     { label: "Product Specifications", icon: ClipboardCheck, href: "/product-specifications" },
+    { label: "Dynamic Fields", icon: Sliders, href: "/dynamic-fields" },
+    { label: "Scanned Products", icon: BarChart3, href: "/scanned-products" },
     { label: "Users", icon: Users, href: "/users" },
     { label: "Settings", icon: Settings, href: "/settings" },
 ];
