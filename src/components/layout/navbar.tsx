@@ -9,7 +9,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
     Search,
@@ -20,13 +20,17 @@ import {
     User,
     Settings,
     LogOut,
+    LogOutIcon,
 } from "lucide-react";
 import { MobileSidebar } from "./mobile-sidebar";
 import { useState } from "react";
 import Link from "next/link";
 
+import { useUser } from "@/contexts/UserContext";
+
 export function Navbar() {
     const [language, setLanguage] = useState<"en" | "hi">("en");
+    const { user, logout } = useUser();
 
     return (
         <header className="h-16 border-b border-border bg-card/80 backdrop-blur-sm flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30">
@@ -59,9 +63,13 @@ export function Navbar() {
 
                 {/* Language */}
                 <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground" />}>
-                        <Globe className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">{language === "en" ? "EN" : "HI"}</span>
+                    <DropdownMenuTrigger render={
+                         <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+                            <Globe className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">{language === "en" ? "EN" : "HI"}</span>
+                        </Button>
+                    }>
+                        
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-32">
                         <DropdownMenuItem onClick={() => setLanguage("en")} className="text-xs">
@@ -81,33 +89,27 @@ export function Navbar() {
                     </Badge>
                 </Button>
 
-                {/* User */}
-                <DropdownMenu>
-                    <DropdownMenuTrigger render={<button className="flex items-center gap-2 pl-2 pr-1 py-1 rounded-lg hover:bg-accent transition-colors" />}>
+                {/* User Info */}
+                {user && (
+                    <div className="flex items-center gap-2 pl-2 pr-1 py-1 rounded-lg border border-transparent transition-colors">
                         <Avatar className="w-7 h-7">
-                            <AvatarFallback className="bg-gradient-to-br from-blue-500 to-blue-700 text-white text-xs font-semibold">
-                                AK
-                            </AvatarFallback>
+                            {user.profile_image ? (
+                                <AvatarImage src={`${process.env.NEXT_PUBLIC_URL}/${user.profile_image}`} alt={user.name} />
+                            ) : (
+                                <AvatarFallback className="bg-gradient-to-br from-blue-500 to-blue-700 text-white text-xs font-semibold">
+                                    {user.name ? user.name.charAt(0).toUpperCase() : "U"}
+                                </AvatarFallback>
+                            )}
                         </Avatar>
-                        <div className="hidden md:flex flex-col items-start">
-                            <span className="text-xs font-semibold leading-tight">Anil Kumar</span>
-                            <span className="text-[10px] text-muted-foreground leading-tight">Super Admin</span>
+                        <div className="hidden md:flex flex-col items-start mr-8">
+                            <span className="text-xs font-semibold leading-tight">{user.name}</span>
+                            <span className="text-[10px] text-muted-foreground leading-tight capitalize">{user.role}</span>
                         </div>
-                        <ChevronDown className="w-3 h-3 text-muted-foreground hidden md:block" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem className="text-xs gap-2">
-                            <User className="w-3.5 h-3.5" /> Profile
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="text-xs gap-2">
-                            <Settings className="w-3.5 h-3.5" /> Settings
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-xs gap-2 text-red-500 focus:text-red-500">
-                            <LogOut className="w-3.5 h-3.5" /> Logout
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={logout}>
+                            <LogOutIcon className="w-4 h-4 text-muted-foreground" />
+                        </Button>
+                    </div>
+                )}
             </div>
         </header>
     );

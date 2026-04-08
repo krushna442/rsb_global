@@ -20,11 +20,13 @@ import {
     Sliders,
 } from "lucide-react";
 import { useState } from "react";
+import { useUser } from "@/contexts/UserContext";
+import { hasAccess } from "@/lib/rbac";
 
 const menuItems = [
     { label: "Dashboard", icon: LayoutDashboard, href: "/" },
     { label: "Product Master", icon: Package, href: "/product-master" },
-    { label: "Approvals", icon: CheckCircle2, href: "/approvals" },
+    { label: "Production Approval", icon: CheckCircle2, href: "/approvals" },
     { label: "Production Verification", icon: ClipboardCheck, href: "/production-verification" },
     { label: "Quality Verification", icon: ShieldCheck, href: "/quality-verification" },
     { label: "Documents", icon: FileText, href: "/documents" },
@@ -38,6 +40,7 @@ const menuItems = [
 export function MobileSidebar() {
     const pathname = usePathname();
     const [open, setOpen] = useState(false);
+    const { user, logout } = useUser();
 
     return (
         <Sheet open={open} onOpenChange={setOpen}>
@@ -59,6 +62,11 @@ export function MobileSidebar() {
                 {/* Navigation */}
                 <nav className="flex-1 py-4 px-3 space-y-1">
                     {menuItems.map((item) => {
+                        // Check if current user has access to this specific menu item
+                        if (!hasAccess(user?.role, item.href)) {
+                            return null;
+                        }
+
                         const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
                         return (
                             <Link
@@ -87,7 +95,10 @@ export function MobileSidebar() {
 
                 {/* Logout */}
                 <div className="px-3 pb-4 mt-auto">
-                    <button className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-sidebar-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 w-full">
+                    <button
+                        onClick={() => logout()}
+                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-sidebar-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 w-full"
+                    >
                         <LogOut className="w-4.5 h-4.5" />
                         <span>Logout</span>
                     </button>

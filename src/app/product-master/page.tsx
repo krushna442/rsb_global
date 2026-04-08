@@ -16,8 +16,11 @@ import {
 import {
     DropdownMenu,
     DropdownMenuContent,
+    DropdownMenuGroup,
     DropdownMenuItem,
     DropdownMenuTrigger,
+    DropdownMenuSeparator,
+    DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import {
     Plus,
@@ -32,6 +35,9 @@ import {
     Filter,
     ChevronLeft,
     ChevronRight,
+    FileDown,
+    MessageSquare,
+    X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -50,17 +56,31 @@ import {
     DialogFooter,
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
+import { useUser } from "@/contexts/UserContext";
+
+// ── Helper: compute 75% of a gram value ─────────────────────────────────────
+function compute75Percent(rawValue: any): string {
+    if (rawValue === undefined || rawValue === null || rawValue === "") return "";
+    const numeric = parseFloat(String(rawValue).replace(/[^\d.]/g, ""));
+    if (isNaN(numeric)) return "";
+    const result = numeric * 0.75;
+    return parseFloat(result.toFixed(4)).toString();
+}
 
 const statusStyles: Record<string, string> = {
     active: "bg-emerald-50 text-emerald-700 border-emerald-200",
     pending: "bg-orange-50 text-orange-700 border-orange-200",
     rejected: "bg-red-50 text-red-700 border-red-200",
+    inactive: "bg-slate-50 text-slate-600 border-slate-200",
 };
 
 export default function ProductMasterPage() {
     const router = useRouter();
-    const { products, counts, loading: productsLoading, deleteProduct, importProducts } = useProducts();
+    const { products, counts, loading: productsLoading, deleteProduct, importProducts ,setInactive } = useProducts();
     const { data: dynamicFieldsData, loading: fieldsLoading } = useDynamicFields();
+    const { user } = useUser();
+    
+    const hasAdminAccess = user?.role === 'admin' || user?.role === 'super admin';
     
     const loading = productsLoading || fieldsLoading;
     const fileRef = useRef<HTMLInputElement>(null);
@@ -84,6 +104,31 @@ export default function ProductMasterPage() {
     const handleEditClick = (product: Product) => {
         setSelectedProduct(product);
         setShowEditModal(true);
+    };
+
+    // Keep selectedProduct in sync with the global products list
+    useEffect(() => {
+        if (showEditModal && selectedProduct) {
+            const current = products.find(p => p.id === selectedProduct.id);
+            if (current && current !== selectedProduct) {
+                setSelectedProduct(current);
+            }
+        }
+    }, [products, showEditModal, selectedProduct]);
+
+    // Remarks Modal State
+    const [showRemarksModal, setShowRemarksModal] = useState(false);
+    const [remarksProduct, setRemarksProduct] = useState<{ partNumber: string; remarks: string[] } | null>(null);
+
+    const handleRemarksClick = (product: any) => {
+        const rawRemarks = product.remarks;
+        const remarks: string[] = Array.isArray(rawRemarks)
+            ? rawRemarks
+            : typeof rawRemarks === "string"
+                ? (() => { try { return JSON.parse(rawRemarks); } catch { return [rawRemarks]; } })()
+                : [];
+        setRemarksProduct({ partNumber: product.part_number || product.partNumber || "—", remarks });
+        setShowRemarksModal(true);
     };
 
     const filteredProducts = useMemo(() => {
@@ -119,6 +164,56 @@ export default function ProductMasterPage() {
     const totalPages = Math.ceil(filteredProducts.length / itemsPerPage) || 1;
     const paginatedProducts = filteredProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
+    // ── Export Excel ─────────────────────────────────────────────────────────
+    const handleExportExcel = (filter: "all" | "active" | "pending" | "rejected" | "inactive") => {
+        const exportProducts = filter === "all"
+            ? products
+            : products.filter(p => ((p as any).status || p.status || "pending").toLowerCase() === filter);
+
+        if (exportProducts.length === 0) {
+            toast.warning(`No ${filter === "all" ? "" : filter + " "}products to export`);
+            return;
+        }
+
+        const headers = dynamicFieldsData?.product_fields.map(f =>
+            f.name.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
+        ) || [];
+
+        const rows = exportProducts.map(product => {
+            const rawGram = (product as any).unbalanceInGram ?? product.specification?.unbalanceInGram;
+            const derived75 = compute75Percent(rawGram);
+
+            return (dynamicFieldsData?.product_fields || []).map(field => {
+                const fieldName = field.name;
+                if (fieldName === "unbalanceInGram75Percent") return derived75 || "";
+                if (fieldName === "status") return (product as any).status || product.status || "Pending";
+
+                const topLevelMap: Record<string, string> = {
+                    partNumber: 'part_number',
+                    customer: 'customer',
+                };
+                const checkKey = topLevelMap[fieldName] || fieldName;
+                let cellValue = (product as any)[checkKey];
+                if (cellValue === undefined) cellValue = product.specification?.[fieldName];
+                return cellValue ?? "";
+            });
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+        ws["!cols"] = headers.map(h => ({ wch: Math.max(h.length + 4, 16) }));
+
+        const wb = XLSX.utils.book_new();
+        const sheetName = filter === "all" ? "All Products" : `${filter.charAt(0).toUpperCase() + filter.slice(1)} Products`;
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+        const fileName = filter === "all"
+            ? `Products_All_${new Date().toISOString().slice(0, 10)}.xlsx`
+            : `Products_${sheetName.replace(" ", "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+        XLSX.writeFile(wb, fileName);
+        toast.success(`Exported ${exportProducts.length} ${filter === "all" ? "" : filter + " "}product(s)`);
+    };
+
     const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -130,276 +225,65 @@ export default function ProductMasterPage() {
                 const wb = XLSX.read(bstr, { type: "binary" });
                 const wsname = wb.SheetNames[0];
                 const ws = wb.Sheets[wsname];
-                // using any to temporarily map rows from the variable spreadsheet
                 const data = XLSX.utils.sheet_to_json<any>(ws);
                 
-const imported = data.map((row: any, index: number) => ({
-    _id: index,
+                const imported = data.map((row: any, index: number) => {
+                    const rawUnbalanceGram = row["Unbalance In Gram"] || row["unbalanceInGram"] || "";
 
-    partNumber:
-        row["Part No."] ||
-        row["Part Number"] ||
-        row["partNumber"] ||
-        `IMP-${Math.floor(Math.random() * 10000)}`,
-
-    customer:
-        row["Customer Name"] ||
-        row["Customer"] ||
-        row["customer"] ||
-        "Unknown",
-
-    vendorCode:
-        row["Vendor Code"] ||
-        row["vendorCode"] ||
-        "",
-
-    tubeLength:
-        row["Tube Length"] ||
-        row["tubeLength"] ||
-        "",
-
-    tubeDiameter:
-        row["Tube Dia & Thickness"] ||
-        row["Tube Diameter"] ||
-        row["tubeDiameter"] ||
-        "",
-
-    partType:
-        row["Part Type"] ||
-        row["partType"] ||
-        "",
-
-    status:
-        row["Status"] ||
-        row["status"] ||
-        "Pending",
-
-    partWeightKg:
-        row["Part Weight in kg/Rev No"] ||
-        row["Part Weight (kg)"] ||
-        row["partWeightKg"] ||
-        "",
-
-    revNo:
-        row["Rev No"] ||
-        row["revNo"] ||
-        "",
-
-    poNumber:
-        row["PO Number"] ||
-        row["poNumber"] ||
-        "",
-
-    supplyDate:
-        row["Supply date"] ||
-        row["Supply Date"] ||
-        row["supplyDate"] ||
-        "",
-
-    sampleStatus:
-        row["Sample Status"] ||
-        row["sampleStatus"] ||
-        "Pending",
-
-    sampleSupplyMode:
-        row["Sample Supply Mode"] ||
-        row["sampleSupplyMode"] ||
-        "",
-
-    acceptedMailDate:
-        row["Accepted Mail Date"] ||
-        row["acceptedMailDate"] ||
-        "",
-
-    trsoDate:
-        row["TRSO Date"] ||
-        row["trsoDate"] ||
-        "",
-
-    trsoModel:
-        row["TRSO MODEL"] ||
-        row["trsoModel"] ||
-        "",
-
-    trsoRev:
-        row["TRSO_Rev"] ||
-        row["trsoRev"] ||
-        "",
-
-    iqaDate:
-        row["IQA Date"] ||
-        row["iqaDate"] ||
-        "",
-
-    iqaModel:
-        row["IQA Model"] ||
-        row["iqaModel"] ||
-        "",
-
-    iqaVcNumber:
-        row["IQA VC Number"] ||
-        row["iqaVcNumber"] ||
-        "",
-
-    ppapIntimateDate:
-        row["PPAP Intimate Date"] ||
-        row["ppapIntimateDate"] ||
-        "",
-
-    ppapClosingDate:
-        row["PPAP closing Date"] ||
-        row["PPAP Closing Date"] ||
-        row["ppapClosingDate"] ||
-        "",
-
-    ppapStatus:
-        row["PPAP Status"] ||
-        row["ppapStatus"] ||
-        "Initiated",
-
-    drawingNumber:
-        row["Drawing Number."] ||
-        row["Drawing Number"] ||
-        row["drawingNumber"] ||
-        "",
-
-    drawingModel:
-        row["Drawing Model"] ||
-        row["drawingModel"] ||
-        "",
-
-    vehicleType:
-        row["Vehicle Type"] ||
-        row["vehicleType"] ||
-        "",
-
-    partDescription:
-        row["Part Description"] ||
-        row["partDescription"] ||
-        "",
-
-    series:
-        row["Series"] ||
-        row["series"] ||
-        "",
-
-    noiseDeadenerLength:
-        row["Noise Deadener length"] ||
-        row["Noise Deadener Length"] ||
-        row["noiseDeadenerLength"] ||
-        "",
-
-    availableNoiseDeadener:
-        row["Available Noise Deadener"] ||
-        row["availableNoiseDeadener"] ||
-        "",
-
-    fepPressHStockPositions:
-        row["Fep Press H. Stock Positions"] ||
-        row["fepPressHStockPositions"] ||
-        "",
-
-    frontEndPieceDetails:
-        row["Front End Piece Details"] ||
-        row["frontEndPieceDetails"] ||
-        "",
-
-    rearHousingLength:
-        row["Rear Housing length"] ||
-        row["Rear Housing Length"] ||
-        row["rearHousingLength"] ||
-        "",
-
-    longForkLength:
-        row["Long Fork Length"] ||
-        row["longForkLength"] ||
-        "",
-
-    sfDetails:
-        row["S.F Details"] ||
-        row["sfDetails"] ||
-        "",
-
-    pdcLength:
-        row["PDC Length"] ||
-        row["pdcLength"] ||
-        "",
-
-    couplingFlangeOrientations:
-        row["Coupling Flange Orientations"] ||
-        row["couplingFlangeOrientations"] ||
-        "",
-
-    hexBoltNutTighteningTorque:
-        row["Hex bolt/Hex Nut Tightening torque"] ||
-        row["Hex Bolt/Hex Nut Tightening Torque"] ||
-        row["hexBoltNutTighteningTorque"] ||
-        "",
-
-    loctiteGradeUse:
-        row["Loctite Grade Use"] ||
-        row["loctiteGradeUse"] ||
-        "",
-
-    cbKitDetails:
-        row["CB KIT Details"] ||
-        row["CB Kit Details"] ||
-        row["cbKitDetails"] ||
-        "",
-
-    slipDetails:
-        row["Slip Details"] ||
-        row["slipDetails"] ||
-        "",
-
-    greaseableOrNonGreaseable:
-        row["Greaseable Or Non Greaseable"] ||
-        row["greaseableOrNonGreaseable"] ||
-        "",
-
-    mountingDetailsFlangeYoke:
-        row["Mounting Details flange yoke."] ||
-        row["Mounting Details flange yoke"] ||
-        row["mountingDetailsFlangeYoke"] ||
-        "",
-
-    mountingDetailsCouplingFlange:
-        row["Mounting Details coupling flange."] ||
-        row["Mounting Details coupling flange"] ||
-        row["mountingDetailsCouplingFlange"] ||
-        "",
-
-    iaBellowDetails:
-        row["I/A Bellow Details"] ||
-        row["iaBellowDetails"] ||
-        "",
-
-    totalLength:
-        row["Total Length"] ||
-        row["totalLength"] ||
-        "",
-
-    balancingRpm:
-        row["Balancing RPM"] ||
-        row["balancingRpm"] ||
-        "",
-
-    unbalanceInCmg:
-        row["Unbalance In Cmg."] ||
-        row["Unbalance In Cmg"] ||
-        row["unbalanceInCmg"] ||
-        "",
-
-    unbalanceInGram:
-        row["Unbalance In Gram"] ||
-        row["unbalanceInGram"] ||
-        "",
-
-    unbalanceInGram75Percent:
-        row["Unbalance In Gram 75%"] ||
-        row["unbalanceInGram75Percent"] ||
-        "",
-}));
+                    return {
+                        _id: index,
+                        partNumber: row["Part No."] || row["Part Number"] || row["partNumber"] || `IMP-${Math.floor(Math.random() * 10000)}`,
+                        customer: row["Customer Name"] || row["Customer"] || row["customer"] || "Unknown",
+                        vendorCode: row["Vendor Code"] || row["vendorCode"] || "",
+                        tubeLength: row["Tube Length"] || row["tubeLength"] || "",
+                        tubeDiameter: row["Tube Dia & Thickness"] || row["Tube Diameter"] || row["tubeDiameter"] || "",
+                        partType: row["Part Type"] || row["partType"] || "",
+                        status: row["Status"] || row["status"] || "Pending",
+                        partWeightKg: row["Part Weight in kg/Rev No"] || row["Part Weight (kg)"] || row["partWeightKg"] || "",
+                        revNo: row["Rev No"] || row["revNo"] || "",
+                        poNumber: row["PO Number"] || row["poNumber"] || "",
+                        supplyDate: row["Supply date"] || row["Supply Date"] || row["supplyDate"] || "",
+                        sampleStatus: row["Sample Status"] || row["sampleStatus"] || "Pending",
+                        sampleSupplyMode: row["Sample Supply Mode"] || row["sampleSupplyMode"] || "",
+                        acceptedMailDate: row["Accepted Mail Date"] || row["acceptedMailDate"] || "",
+                        trsoDate: row["TRSO Date"] || row["trsoDate"] || "",
+                        trsoModel: row["TRSO MODEL"] || row["trsoModel"] || "",
+                        trsoRev: row["TRSO_Rev"] || row["trsoRev"] || "",
+                        iqaDate: row["IQA Date"] || row["iqaDate"] || "",
+                        iqaModel: row["IQA Model"] || row["iqaModel"] || "",
+                        iqaVcNumber: row["IQA VC Number"] || row["iqaVcNumber"] || "",
+                        ppapIntimateDate: row["PPAP Intimate Date"] || row["ppapIntimateDate"] || "",
+                        ppapClosingDate: row["PPAP closing Date"] || row["PPAP Closing Date"] || row["ppapClosingDate"] || "",
+                        ppapStatus: row["PPAP Status"] || row["ppapStatus"] || "Initiated",
+                        drawingNumber: row["Drawing Number."] || row["Drawing Number"] || row["drawingNumber"] || "",
+                        drawingModel: row["Drawing Model"] || row["drawingModel"] || "",
+                        vehicleType: row["Vehicle Type"] || row["vehicleType"] || "",
+                        partDescription: row["Part Description"] || row["partDescription"] || "",
+                        series: row["Series"] || row["series"] || "",
+                        noiseDeadenerLength: row["Noise Deadener length"] || row["Noise Deadener Length"] || row["noiseDeadenerLength"] || "",
+                        availableNoiseDeadener: row["Available Noise Deadener"] || row["availableNoiseDeadener"] || "",
+                        fepPressHStockPositions: row["Fep Press H. Stock Positions"] || row["fepPressHStockPositions"] || "",
+                        frontEndPieceDetails: row["Front End Piece Details"] || row["frontEndPieceDetails"] || "",
+                        rearHousingLength: row["Rear Housing length"] || row["Rear Housing Length"] || row["rearHousingLength"] || "",
+                        longForkLength: row["Long Fork Length"] || row["longForkLength"] || "",
+                        sfDetails: row["S.F Details"] || row["sfDetails"] || "",
+                        pdcLength: row["PDC Length"] || row["pdcLength"] || "",
+                        couplingFlangeOrientations: row["Coupling Flange Orientations"] || row["couplingFlangeOrientations"] || "",
+                        hexBoltNutTighteningTorque: row["Hex bolt/Hex Nut Tightening torque"] || row["Hex Bolt/Hex Nut Tightening Torque"] || row["hexBoltNutTighteningTorque"] || "",
+                        loctiteGradeUse: row["Loctite Grade Use"] || row["loctiteGradeUse"] || "",
+                        cbKitDetails: row["CB KIT Details"] || row["CB Kit Details"] || row["cbKitDetails"] || "",
+                        slipDetails: row["Slip Details"] || row["slipDetails"] || "",
+                        greaseableOrNonGreaseable: row["Greaseable Or Non Greaseable"] || row["greaseableOrNonGreaseable"] || "",
+                        mountingDetailsFlangeYoke: row["Mounting Details flange yoke."] || row["Mounting Details flange yoke"] || row["mountingDetailsFlangeYoke"] || "",
+                        mountingDetailsCouplingFlange: row["Mounting Details coupling flange."] || row["Mounting Details coupling flange"] || row["mountingDetailsCouplingFlange"] || "",
+                        iaBellowDetails: row["I/A Bellow Details"] || row["iaBellowDetails"] || "",
+                        totalLength: row["Total Length"] || row["totalLength"] || "",
+                        balancingRpm: row["Balancing RPM"] || row["balancingRpm"] || "",
+                        unbalanceInCmg: row["Unbalance In Cmg."] || row["Unbalance In Cmg"] || row["unbalanceInCmg"] || "",
+                        unbalanceInGram: rawUnbalanceGram,
+                        unbalanceInGram75Percent: compute75Percent(rawUnbalanceGram),
+                    };
+                });
 
                 setImportData(imported);
                 setShowImportModal(true);
@@ -413,7 +297,11 @@ const imported = data.map((row: any, index: number) => ({
 
     const handleUpdateImportRow = (index: number, field: string, value: string) => {
         const newData = [...importData];
-        newData[index] = { ...newData[index], [field]: value };
+        const updatedRow = { ...newData[index], [field]: value };
+        if (field === "unbalanceInGram") {
+            updatedRow.unbalanceInGram75Percent = compute75Percent(value);
+        }
+        newData[index] = updatedRow;
         setImportData(newData);
     };
 
@@ -451,6 +339,26 @@ const imported = data.map((row: any, index: number) => ({
         }
     };
 
+    const handleDownloadTemplate = () => {
+        const headers = [
+            "Drawing Number.", "Drawing Model", "Vehicle Type", "Customer Name",
+            "Vendor Code", "Part No.", "Part Description", "Tube Dia & Thickness",
+            "Series", "Tube Length", "Part Type", "Noise Deadener length",
+            "Available Noise Deadener", "Fep Press H. Stock Positions", "Front End Piece Details",
+            "Rear Housing length", "Long Fork Length", "S.F Details", "PDC Length",
+            "Coupling Flange Orientations", "Hex bolt/Hex Nut Tightening torque",
+            "Loctite Grade Use", "CB KIT Details", "Slip Details", "Greaseable Or Non Greaseable",
+            "Mounting Details flange yoke.", "Mounting Details coupling flange.", "I/A Bellow Details",
+            "Total Length", "Balancing RPM", "Unbalance In Cmg.", "Unbalance In Gram",
+            "Rev No", "Part Weight in kg/Rev No", "PO Number", "Supply date"
+        ];
+        const ws = XLSX.utils.aoa_to_sheet([headers]);
+        ws["!cols"] = headers.map(h => ({ wch: Math.max(h.length + 4, 18) }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Template");
+        XLSX.writeFile(wb, "Product_Import_Template.xlsx");
+    };
+
     const importColumns = useMemo(() => {
         if (!dynamicFieldsData?.product_fields) return [];
         return dynamicFieldsData.product_fields
@@ -475,26 +383,71 @@ const imported = data.map((row: any, index: number) => ({
                         <p className="text-sm text-muted-foreground mt-1">Manage product specifications and inventory</p>
                     </div>
                     <div className="flex items-center gap-2">
-                        <input type="file" ref={fileRef} className="hidden" accept=".xlsx,.xls,.csv" onChange={handleImportExcel} />
-                        <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => fileRef.current?.click()}>
-                            <Upload className="w-3.5 h-3.5" />
-                            Import Excel
-                        </Button>
-                        <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs">
-                            <Download className="w-3.5 h-3.5" />
-                            Export Data
-                        </Button>
-                        <Link href="/product-master/new">
-                            <Button size="sm" className="h-9 gap-1.5 text-xs">
-                                <Plus className="w-3.5 h-3.5" />
-                                Add Product
-                            </Button>
-                        </Link>
+                        {/* Export Excel Dropdown */}
+                        <DropdownMenu>
+                            <DropdownMenuTrigger render={
+                                <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs">
+                                    <FileDown className="w-3.5 h-3.5" />
+                                    Export Excel
+                                </Button>
+                            } />
+                            <DropdownMenuContent align="end" className="w-48">
+                                <DropdownMenuGroup>
+                                    <DropdownMenuLabel className="text-xs text-muted-foreground">Download by status</DropdownMenuLabel>
+                                </DropdownMenuGroup>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleExportExcel("all")}>
+                                    <Download className="w-3.5 h-3.5 mr-2" />
+                                    All Products
+                                    <span className="ml-auto text-muted-foreground">{counts?.total || 0}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleExportExcel("active")}>
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2 flex-shrink-0" />
+                                    Active
+                                    <span className="ml-auto text-muted-foreground">{counts?.active || 0}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleExportExcel("pending")}>
+                                    <span className="w-2 h-2 rounded-full bg-orange-500 mr-2 flex-shrink-0" />
+                                    Pending
+                                    <span className="ml-auto text-muted-foreground">{counts?.pending || 0}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleExportExcel("rejected")}>
+                                    <span className="w-2 h-2 rounded-full bg-red-500 mr-2 flex-shrink-0" />
+                                    Rejected
+                                    <span className="ml-auto text-muted-foreground">{counts?.rejected || 0}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleExportExcel("inactive")}>
+                                    <span className="w-2 h-2 rounded-full bg-slate-400 mr-2 flex-shrink-0" />
+                                    Inactive
+                                    <span className="ml-auto text-muted-foreground">{counts?.inactive || 0}</span>
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        {hasAdminAccess && (
+                            <>
+                                <input type="file" ref={fileRef} className="hidden" accept=".xlsx,.xls,.csv" onChange={handleImportExcel} />
+                                <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => fileRef.current?.click()}>
+                                    <Upload className="w-3.5 h-3.5" />
+                                    Import Excel
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={handleDownloadTemplate}>
+                                    <Download className="w-3.5 h-3.5" />
+                                    Download template
+                                </Button>
+                                <Link href="/product-master/new">
+                                    <Button size="sm" className="h-9 gap-1.5 text-xs">
+                                        <Plus className="w-3.5 h-3.5" />
+                                        Add Product
+                                    </Button>
+                                </Link>
+                            </>
+                        )}
                     </div>
                 </div>
 
                 {/* Statistics */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                     <Card className="border-0 shadow-sm pb-0">
                         <CardContent className="p-4 flex flex-col items-center justify-center">
                             <span className="text-2xl font-bold">{counts?.total || 0}</span>
@@ -517,6 +470,12 @@ const imported = data.map((row: any, index: number) => ({
                         <CardContent className="p-4 flex flex-col items-center justify-center">
                             <span className="text-2xl font-bold text-red-600">{counts?.rejected || 0}</span>
                             <span className="text-xs text-red-600/80 uppercase tracking-wider mt-1">Rejected</span>
+                        </CardContent>
+                    </Card>
+                    <Card className="border-0 shadow-sm pb-0">
+                        <CardContent className="p-4 flex flex-col items-center justify-center">
+                            <span className="text-2xl font-bold text-slate-500">{counts?.inactive || 0}</span>
+                            <span className="text-xs text-slate-500/80 uppercase tracking-wider mt-1">Inactive</span>
                         </CardContent>
                     </Card>
                 </div>
@@ -543,6 +502,7 @@ const imported = data.map((row: any, index: number) => ({
                                 <option value="active">Active</option>
                                 <option value="pending">Pending</option>
                                 <option value="rejected">Rejected</option>
+                                <option value="inactive">Inactive</option>
                             </select>
                             <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs">
                                 <Filter className="w-3.5 h-3.5" />
@@ -573,7 +533,7 @@ const imported = data.map((row: any, index: number) => ({
                                                 </TableHead>
                                             );
                                         })}
-                                        <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground h-10 pr-6 text-right sticky right-0 bg-background/95 backdrop-blur z-10">Actions</TableHead>
+                                        {hasAdminAccess && <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground h-10 pr-6 text-right sticky right-0 bg-background/95 backdrop-blur z-10">Actions</TableHead>}
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -583,8 +543,11 @@ const imported = data.map((row: any, index: number) => ({
                                             return `text-sm whitespace-nowrap ${baseClass} ${isEdited(key) ? "bg-amber-100/50 dark:bg-amber-900/40 font-medium text-amber-900 dark:text-amber-200" : ""}`;
                                         };
 
+                                        const rawGram = (product as any).unbalanceInGram ?? product.specification?.unbalanceInGram;
+                                        const derived75 = compute75Percent(rawGram);
+
                                         return (
-                                        <TableRow key={(product as any).id || product.specification?.id} className="group  hover:bg-muted/20 transition-colors">
+                                        <TableRow key={(product as any).id || product.specification?.id} className="group hover:bg-muted/20 transition-colors">
                                             {dynamicFieldsData?.product_fields.map((field, idx) => {
                                                 const isFirst = idx === 0;
                                                 const fieldName = field.name;
@@ -592,9 +555,35 @@ const imported = data.map((row: any, index: number) => ({
                                                 if (fieldName === 'status') {
                                                     return (
                                                         <TableCell key={fieldName} className={getCellClass("status", "whitespace-nowrap")}>
-                                                            <Badge variant="outline" className={`text-[10px] ${statusStyles[(product as any).status || product.status || "Pending"] || "bg-gray-50 text-gray-700 border-gray-200"}`}>
+                                                            <Badge variant="outline" className={`text-[10px] ${statusStyles[((product as any).status || product.status || "Pending").toLowerCase()] || "bg-gray-50 text-gray-700 border-gray-200"}`}>
                                                                 {(product as any).status || product.status || "Pending"}
                                                             </Badge>
+                                                        </TableCell>
+                                                    );
+                                                }
+
+                                                if (fieldName === "unbalanceInGram75Percent") {
+                                                    return (
+                                                        <TableCell key={fieldName} className={getCellClass(fieldName, "text-muted-foreground")}>
+                                                            {derived75 || "-"}
+                                                        </TableCell>
+                                                    );
+                                                }
+
+                                                // ── Remarks: show last entry only ────────────────
+                                                if (fieldName === "remarks") {
+                                                    const rawRemarks = (product as any).remarks;
+                                                    const remarksArr: string[] = Array.isArray(rawRemarks)
+                                                        ? rawRemarks
+                                                        : typeof rawRemarks === "string"
+                                                            ? (() => { try { return JSON.parse(rawRemarks); } catch { return rawRemarks ? [rawRemarks] : []; } })()
+                                                            : [];
+                                                    const lastRemark = remarksArr.length > 0 ? remarksArr[remarksArr.length - 1] : null;
+                                                    return (
+                                                        <TableCell key={fieldName} className={getCellClass(fieldName, "text-muted-foreground max-w-[260px]")}>
+                                                            <span className="block truncate text-xs" title={lastRemark || ""}>
+                                                                {lastRemark || "-"}
+                                                            </span>
                                                         </TableCell>
                                                     );
                                                 }
@@ -610,7 +599,6 @@ const imported = data.map((row: any, index: number) => ({
                                                     cellValue = product.specification?.[fieldName];
                                                 }
 
-                                                // apply styling rules
                                                 let baseClass = "text-muted-foreground";
                                                 if (isFirst) baseClass = "font-mono font-medium pl-6";
                                                 if (checkKey === 'customer' || fieldName === 'partType') baseClass = "";
@@ -622,35 +610,71 @@ const imported = data.map((row: any, index: number) => ({
                                                     </TableCell>
                                                 );
                                             })}
-                                            <TableCell className="pr-6 text-right sticky right-0 bg-background/95 backdrop-blur z-10 group-hover:bg-muted/20 transition-colors">
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity" />}>
-                                                        <MoreHorizontal className="w-4 h-4" />
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="w-36">
-                                                        <DropdownMenuItem 
-                                                            className="text-xs p-0 cursor-pointer" 
-                                                            onClick={(e) => { 
-                                                                e.preventDefault(); 
-                                                                handleEditClick(product as Product); 
-                                                            }}
-                                                        >
-                                                            <div className="flex items-center w-full px-2 py-1.5">
-                                                                <Pencil className="w-3.5 h-3.5 mr-2" /> Edit
-                                                            </div>
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem className="text-xs gap-2 cursor-pointer">
-                                                            <CheckCircle2 className="w-3.5 h-3.5" /> Approve
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem 
-                                                            className="text-xs gap-2 text-red-500 focus:text-red-500 cursor-pointer"
-                                                            onClick={() => deleteProduct(product.id)}
-                                                        >
-                                                            <Trash2 className="w-3.5 h-3.5" /> Delete
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </TableCell>
+                                            {hasAdminAccess && (
+                                                <TableCell className="pr-6 text-right sticky right-0 bg-background/95 backdrop-blur z-10 group-hover:bg-muted/20 transition-colors">
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity" />}>
+                                                            <MoreHorizontal className="w-4 h-4" />
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end" className="w-36">
+                                                            <DropdownMenuItem 
+                                                                className="text-xs p-0 cursor-pointer" 
+                                                                onClick={(e) => { 
+                                                                    e.stopPropagation(); 
+                                                                    handleEditClick(product as any);
+                                                                }}
+                                                            >
+                                                                <div className="flex w-full items-center gap-2 p-2">
+                                                                    <Pencil className="w-3.5 h-3.5" /> Edit Data
+                                                                </div>
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem
+                                                                className="text-xs p-0 cursor-pointer"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleRemarksClick(product);
+                                                                }}
+                                                            >
+                                                                <div className="flex w-full items-center gap-2 p-2">
+                                                                    <MessageSquare className="w-3.5 h-3.5" /> Remarks
+                                                                </div>
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuSeparator />
+                                                            <DropdownMenuItem
+                                                                className="text-xs text-red-600 focus:text-red-600 p-0 cursor-pointer"
+                                                                onClick={(e) => {
+                                                                    if (window.confirm("Are you sure you want to inactivate this product?")) {   
+                                                                        e.stopPropagation();
+                                                                        setInactive(product.id);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <div className="flex w-full items-center gap-2 p-2">
+                                                                    <X className="w-3.5 h-3.5" /> Inactive
+                                                                </div>
+                                                            </DropdownMenuItem>
+                                                        
+
+                                                            <DropdownMenuItem 
+                                                                className="text-xs text-red-600 focus:text-red-600 p-0 cursor-pointer"
+                                                                onClick={(e) => { 
+                                                                    e.stopPropagation(); 
+                                                                    const id = (product as any).id || product.specification?.id;
+                                                                    if (id) {
+                                                                        if (window.confirm("Are you sure you want to delete this product?")) {   
+                                                                            deleteProduct(id);
+                                                                        }
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <div className="flex w-full items-center gap-2 p-2">
+                                                                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                                                                </div>
+                                                            </DropdownMenuItem>
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                </TableCell>
+                                            )}
                                         </TableRow>
                                     );
                                     })}
@@ -713,6 +737,7 @@ const imported = data.map((row: any, index: number) => ({
                     </CardContent>
                 </Card>
             </div>
+
             {/* Import Modal */}
             <Dialog open={showImportModal} onOpenChange={(open) => !isImporting && setShowImportModal(open)}>
                 <DialogContent className="!max-w-[95vw] w-full max-h-[90vh] flex flex-col p-6 overflow-hidden">
@@ -762,7 +787,10 @@ const imported = data.map((row: any, index: number) => ({
                                                     <Input 
                                                         value={row[col.key] || ""} 
                                                         onChange={(e) => handleUpdateImportRow(index, col.key, e.target.value)} 
-                                                        className="h-8 text-xs" 
+                                                        className="h-8 text-xs"
+                                                        readOnly={col.key === "unbalanceInGram75Percent"}
+                                                        title={col.key === "unbalanceInGram75Percent" ? "Auto-computed as 75% of Unbalance In Gram" : undefined}
+                                                        style={col.key === "unbalanceInGram75Percent" ? { background: "var(--muted)", cursor: "not-allowed", opacity: 0.75 } : undefined}
                                                     />
                                                 </TableCell>
                                             ))}
@@ -803,12 +831,55 @@ const imported = data.map((row: any, index: number) => ({
                             isPopup={true}
                             onSuccess={() => {
                                 setShowEditModal(false);
-                                // The ProductsContext already calls fetchProducts() automatically on update/create success!
                             }}
                             onCancel={() => setShowEditModal(false)}
                         />
                     </div>
                 )}
+            </DialogContent>
+        </Dialog>
+
+        {/* Remarks Modal */}
+        <Dialog open={showRemarksModal} onOpenChange={setShowRemarksModal}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 text-base">
+                        <MessageSquare className="w-4 h-4 text-muted-foreground" />
+                        Remarks
+                        {remarksProduct && (
+                            <span className="font-mono text-xs text-muted-foreground font-normal ml-1">
+                                — {remarksProduct.partNumber}
+                            </span>
+                        )}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="mt-2 space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                    {remarksProduct && remarksProduct.remarks.length > 0 ? (
+                        remarksProduct.remarks.map((remark, idx) => (
+                            <div
+                                key={idx}
+                                className={`flex gap-3 p-3 rounded-md border text-sm ${
+                                    idx === remarksProduct.remarks.length - 1
+                                        ? "bg-primary/5 border-primary/20 text-foreground font-medium"
+                                        : "bg-muted/30 border-border/50 text-muted-foreground"
+                                }`}
+                            >
+                                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-semibold text-muted-foreground mt-0.5">
+                                    {idx + 1}
+                                </span>
+                                <span className="leading-relaxed">{remark}</span>
+                                {idx === remarksProduct.remarks.length - 1 && (
+                                    <span className="ml-auto flex-shrink-0 text-[10px] text-primary font-normal self-start mt-0.5">latest</span>
+                                )}
+                            </div>
+                        ))
+                    ) : (
+                        <p className="text-sm text-muted-foreground text-center py-6">No remarks found.</p>
+                    )}
+                </div>
+                <DialogFooter className="mt-4">
+                    <Button variant="outline" size="sm" onClick={() => setShowRemarksModal(false)}>Close</Button>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     </>

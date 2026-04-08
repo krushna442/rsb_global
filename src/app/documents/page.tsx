@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -17,414 +17,470 @@ import {
 import {
     Dialog,
     DialogContent,
-    DialogHeader,
     DialogTitle,
-    DialogFooter,
-    DialogDescription,
 } from "@/components/ui/dialog";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import {
-    Upload,
     Search,
     FileText,
-    FileImage,
-    FileSpreadsheet,
-    Trash2,
-    Plus,
-    Filter,
     Eye,
+    Download,
+    ChevronLeft,
+    ChevronRight,
+    Pencil,
+    Trash2,
+    Upload,
     X,
-    Loader2
+    ChevronDown,
+    ChevronUp,
+    MinusCircle,
+    AlertCircle,
 } from "lucide-react";
 import { useProducts } from "@/contexts/ProductsContext";
+import { useUser } from "@/contexts/UserContext"; // adjust import path as needed
 import { Product } from "@/types/api";
-import { toast } from "sonner";
-import { Label } from "@/components/ui/label";
+import ExcelJS from "exceljs";
+// exceljs + file-saver are imported dynamically inside handleDownloadExcel
 
-const typeIcon: Record<string, React.ElementType> = {
-    Drawing: FileImage,
-    IQA: FileSpreadsheet,
-    PO: FileText,
-    TRSO: FileText,
-    PSW: FileText,
-    default: FileText
-};
+// ─── Constants ───────────────────────────────────────────────────────────────
 
-const typeBadge: Record<string, string> = {
-    Drawing: "bg-purple-50 text-purple-700 border-purple-200",
-    IQA: "bg-teal-50 text-teal-700 border-teal-200",
-    PO: "bg-blue-50 text-blue-700 border-blue-200",
-    TRSO: "bg-orange-50 text-orange-700 border-orange-200",
-    PSW: "bg-green-50 text-green-700 border-green-200",
-    default: "bg-gray-50 text-gray-700 border-gray-200"
-};
-
-const DOCUMENT_TYPES = [
+const INDIVIDUAL_DOCS = [
     "PSW",
-    "Control Plan",
-    "FMEA",
-    "Process Flow",
-    "Drawing",
-    "Material Cert",
-    "Dimensional Results",
-    "Test Results",
-    "Initial Process Studies",
-    "MSA",
-    "Part Submission Warrant",
-    "Other"
+    "TRSO",
+    "IQA",
+    "PO OPY",
+    "DRAWING",
+    "INSPECTION REPORT",
+    "STICKER",
 ];
 
-// Helper to convert backend file path into accessible URL
-const getFileUrl = (filePath: string) => {
-    // If it's already an absolute URL, return it
-    if (filePath.startsWith('http')) return filePath;
-    // Otherwise replace backslashes (Windows) to forward slashes and prepend server base url
-    const normalizedPath = filePath.replace(/\\/g, '/');
-    return `https://rsb-server-1.onrender.com/${normalizedPath}`;
+const PPAP_DOCS = [
+    "DRAWING",
+    "SAMPLE REPORT",
+    "MR REPORT",
+    "SPC",
+    "MSA",
+    "PIST",
+    "PFMEA",
+    "PFD",
+    "CONTROL PLAN",
+    "IQA",
+    "WELDING REPORT",
+];
+
+// Map document_name_array keys → display labels (adjust to match your data)
+const DOC_NAME_LABEL_MAP: Record<string, string> = {
+    Drawing_Document: "DRAWING",
+    IQA_Document: "IQA",
+    Po_Document: "PO OPY",
+    TRSO_Document: "TRSO",
+    PSW_Document: "PSW",
+    Inspection_Report: "INSPECTION REPORT",
+    Sticker_Document: "STICKER",
 };
 
-export default function DocumentsPage() {
-    const { getProductByPart, uploadPpapDocument, deletePpapDocument } = useProducts();
-    const [searchQuery, setSearchQuery] = useState("");
-    const [isSearching, setIsSearching] = useState(false);
-    const [product, setProduct] = useState<Product | null>(null);
-    const [searchMessage, setSearchMessage] = useState("");
-    
-    // Upload Modal State
-    const [isUploadOpen, setIsUploadOpen] = useState(false);
-    const [uploadDocName, setUploadDocName] = useState("");
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [isUploading, setIsUploading] = useState(false);
-    
-    // View Modal State
-    const [viewDoc, setViewDoc] = useState<{name: string, url: string} | null>(null);
-    const [isDeleting, setIsDeleting] = useState(false);
+interface CategorizedDocs {
+    individual: Record<string, string>;
+    ppap: Record<string, string>;
+}
 
-    const handleSearch = async () => {
-        if (!searchQuery.trim()) return;
-        
-        setIsSearching(true);
-        setSearchMessage("");
-        setProduct(null);
-        
-        try {
-            const foundProduct = await getProductByPart(searchQuery.trim());
-            if (foundProduct) {
-                if (foundProduct.status !== 'active') {
-                    setSearchMessage("This product is not active.");
-                } else {
-                    setProduct(foundProduct);
-                }
-            } else {
-                setSearchMessage("No product found with this part number.");
-            }
-        } catch (error) {
-            setSearchMessage("Error retrieving product details.");
-        } finally {
-            setIsSearching(false);
-        }
-    };
+// Value saved in DB when a document is marked not required
+const NOT_REQUIRED_VALUE = "not_required";
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
-            handleSearch();
-        }
-    };
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-    const handleUploadSubmit = async () => {
-        if (!product || !uploadDocName || !selectedFile) {
-            toast.error("Please provide both a document name and a file.");
-            return;
-        }
+const getFileUrl = (filePath: string) => {
+    if (filePath.startsWith("http")) return filePath;
+    const normalizedPath = filePath.replace(/\\/g, "/");
+    return `${process.env.NEXT_PUBLIC_URL}/${normalizedPath}`;
+};
 
-        setIsUploading(true);
-        const success = await uploadPpapDocument(product.id, uploadDocName, selectedFile);
-        if (success) {
-            // refresh product details
-            const updatedProduct = await getProductByPart(product.part_number);
-            setProduct(updatedProduct);
-            setIsUploadOpen(false);
-            setUploadDocName("");
-            setSelectedFile(null);
+const parseCategorizedDocs = (raw: any): CategorizedDocs => {
+    const empty: CategorizedDocs = { individual: {}, ppap: {} };
+    if (!raw) return empty;
+    try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (!parsed || typeof parsed !== "object") return empty;
+        if (parsed.individual || parsed.ppap) {
+            return {
+                individual:
+                    parsed.individual && typeof parsed.individual === "object"
+                        ? parsed.individual
+                        : {},
+                ppap:
+                    parsed.ppap && typeof parsed.ppap === "object"
+                        ? parsed.ppap
+                        : {},
+            };
         }
-        setIsUploading(false);
-    };
-
-    const handleDeleteDoc = async (fileName: string) => {
-        if (!product) return;
-        setIsDeleting(true);
-        const success = await deletePpapDocument(product.id, fileName);
-        if (success) {
-            toast.success("Document deleted successfully");
-            setViewDoc(null); // close view modal if open
-            // refresh product details
-            const updatedProduct = await getProductByPart(product.part_number);
-            setProduct(updatedProduct);
-        }
-        setIsDeleting(false);
-    };
-
-    // Parse documents from JSON
-    let parsedDocuments: Record<string, string> = {};
-    if (product?.ppap_documents) {
-        try {
-            parsedDocuments = typeof product.ppap_documents === 'string' ? JSON.parse(product.ppap_documents) : product.ppap_documents;
-        } catch (e) {
-            console.error("Failed to parse ppap_documents", e);
-        }
+        return { individual: parsed, ppap: {} };
+    } catch {
+        return empty;
     }
-    
-    const documentEntries = Object.entries(parsedDocuments);
+};
+
+const findDocPath = (
+    docs: Record<string, string>,
+    docName: string
+): string | null => {
+    if (docs[docName]) return docs[docName];
+    const lowerName = docName.toLowerCase();
+    for (const [key, val] of Object.entries(docs)) {
+        if (key.toLowerCase() === lowerName) return val;
+    }
+    return null;
+};
+
+const isNotRequired = (path: string | null): boolean =>
+    path === NOT_REQUIRED_VALUE;
+
+const RECORDS_PER_PAGE = 60;
+
+// ─── Vacancy Summary ──────────────────────────────────────────────────────────
+
+interface VacancyItem {
+    docName: string;
+    category: string;
+    missingParts: string[];
+}
+
+function useVacancySummary(
+    products: Product[],
+    allIndividualCols: string[],
+    allPpapCols: string[]
+): VacancyItem[] {
+    return useMemo(() => {
+        const indMap: Record<string, string[]> = {};
+        const ppapMap: Record<string, string[]> = {};
+
+        allIndividualCols.forEach((doc) => (indMap[doc] = []));
+        allPpapCols.forEach((doc) => (ppapMap[doc] = []));
+
+        products.forEach((p) => {
+            const docs = parseCategorizedDocs(p.ppap_documents);
+            allIndividualCols.forEach((doc) => {
+                const path = findDocPath(docs.individual, doc);
+                if (!path || isNotRequired(path)) return; // skip if present or not-required
+                if (!path) indMap[doc].push(p.part_number || `#${p.id}`);
+            });
+            // Re-do: count only truly missing (no path at all)
+            allIndividualCols.forEach((doc) => {
+                const path = findDocPath(docs.individual, doc);
+                if (!path) indMap[doc].push(p.part_number || `#${p.id}`);
+            });
+            allPpapCols.forEach((doc) => {
+                const path = findDocPath(docs.ppap, doc);
+                if (!path) ppapMap[doc].push(p.part_number || `#${p.id}`);
+            });
+        });
+
+        // Deduplicate (we pushed twice above for individual – fix)
+        allIndividualCols.forEach((doc) => {
+            const seen = new Set<string>();
+            indMap[doc] = indMap[doc].filter((v) => {
+                if (seen.has(v)) return false;
+                seen.add(v);
+                return true;
+            });
+        });
+
+        const result: VacancyItem[] = [];
+        allIndividualCols.forEach((doc) => {
+            if (indMap[doc].length > 0)
+                result.push({
+                    docName: doc,
+                    category: "Individual",
+                    missingParts: indMap[doc],
+                });
+        });
+        allPpapCols.forEach((doc) => {
+            if (ppapMap[doc].length > 0)
+                result.push({
+                    docName: doc,
+                    category: "PPAP",
+                    missingParts: ppapMap[doc],
+                });
+        });
+        return result;
+    }, [products, allIndividualCols, allPpapCols]);
+}
+
+// ─── Vacancy Banner Component ─────────────────────────────────────────────────
+
+function VacancyBanner({ items }: { items: VacancyItem[] }) {
+    const [expanded, setExpanded] = useState<string | null>(null);
+
+    if (items.length === 0) return null;
 
     return (
-        <DashboardLayout>
-            <div className="space-y-6">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight">PPAP Documents</h1>
-                        <p className="text-sm text-muted-foreground mt-1">Manage process and product documentation</p>
-                    </div>
+        <Card className="border-0 shadow-sm bg-amber-50/60">
+            <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                    <AlertCircle className="w-4 h-4 text-amber-600" />
+                    <span className="text-sm font-semibold text-amber-800">
+                        Document Vacancies — {items.reduce((a, b) => a + b.missingParts.length, 0)} missing across {items.length} types
+                    </span>
                 </div>
-
-                {/* Search Header */}
-                <Card className="border-0 shadow-sm overflow-hidden">
-                    <CardContent className="p-6 bg-gradient-to-r from-muted/50 to-transparent">
-                        <div className="flex flex-col sm:flex-row gap-4 max-w-2xl">
-                            <div className="relative flex-1">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                <Input
-                                    placeholder="Enter Part Number to search..."
-                                    className="pl-9 h-11 bg-background"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    onKeyDown={handleKeyDown}
-                                />
-                            </div>
-                            <Button className="h-11 px-8" onClick={handleSearch} disabled={isSearching}>
-                                {isSearching ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                                {isSearching ? "Searching..." : "Search"}
-                            </Button>
-                        </div>
-                        {searchMessage && (
-                            <div className="mt-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm font-medium border border-red-100 flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                                {searchMessage}
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-
-                {/* Product & Document Content */}
-                {product && product.status === 'active' && (
-                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                        {/* Product Info Header */}
-                        <div className="flex items-center justify-between bg-primary/5 border border-primary/10 rounded-xl p-4 px-6">
-                            <div className="flex items-center gap-6">
-                                <div>
-                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Part Number</p>
-                                    <p className="text-lg font-bold text-foreground">{product.part_number}</p>
-                                </div>
-                                <div className="h-8 w-px bg-border/50"></div>
-                                <div>
-                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Customer</p>
-                                    <p className="text-sm font-medium text-foreground">{product.customer}</p>
-                                </div>
-                            </div>
-                            <Button onClick={() => setIsUploadOpen(true)} className="gap-2 shadow-sm">
-                                <Plus className="w-4 h-4" />
-                                Add Document
-                            </Button>
-                        </div>
-
-                        {/* Documents Table */}
-                        <Card className="border-0 shadow-sm overflow-hidden">
-                            <CardHeader className="pb-0 px-6 pt-5">
-                                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                    <FileText className="w-4 h-4 text-primary" />
-                                    Attached Documents
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="p-0 mt-4">
-                                {documentEntries.length === 0 ? (
-                                    <div className="p-12 text-center text-muted-foreground flex flex-col items-center justify-center">
-                                        <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
-                                            <FileText className="w-8 h-8 text-muted-foreground/50" />
+                <div className="flex flex-wrap gap-2">
+                    {items.map((item) => {
+                        const key = `${item.category}-${item.docName}`;
+                        const isOpen = expanded === key;
+                        return (
+                            <div key={key} className="relative">
+                                <button
+                                    onClick={() => setExpanded(isOpen ? null : key)}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                                        item.category === "Individual"
+                                            ? "bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-200"
+                                            : "bg-purple-100 text-purple-800 border-purple-200 hover:bg-purple-200"
+                                    }`}
+                                >
+                                    <span>{item.docName}</span>
+                                    <span className="bg-white/70 rounded px-1 text-[10px] font-bold">
+                                        {item.missingParts.length} missing
+                                    </span>
+                                    {isOpen ? (
+                                        <ChevronUp className="w-3 h-3" />
+                                    ) : (
+                                        <ChevronDown className="w-3 h-3" />
+                                    )}
+                                </button>
+                                {isOpen && (
+                                    <div className="absolute top-full left-0 mt-1 z-30 bg-white border rounded-xl shadow-xl p-3 min-w-[200px] max-w-[280px] max-h-[200px] overflow-y-auto">
+                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">
+                                            Missing in:
+                                        </p>
+                                        <div className="flex flex-wrap gap-1">
+                                            {item.missingParts.map((pn) => (
+                                                <span
+                                                    key={pn}
+                                                    className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded"
+                                                >
+                                                    {pn}
+                                                </span>
+                                            ))}
                                         </div>
-                                        <p className="font-medium text-foreground">No documents found</p>
-                                        <p className="text-sm mt-1">Upload PPAP documents for this product to see them here.</p>
-                                        <Button variant="outline" className="mt-4 gap-2" onClick={() => setIsUploadOpen(true)}>
-                                            <Upload className="w-4 h-4" /> Upload First Document
-                                        </Button>
-                                    </div>
-                                ) : (
-                                    <div className="overflow-x-auto">
-                                        <Table>
-                                            <TableHeader>
-                                                <TableRow className="bg-muted/30 hover:bg-muted/30">
-                                                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground h-11 pl-6">Document Name</TableHead>
-                                                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground h-11 pr-6 text-right">Actions</TableHead>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {documentEntries.map(([name, url]) => {
-                                                    const iconKey = Object.keys(typeIcon).find(key => name.includes(key)) || 'default';
-                                                    const Icon = typeIcon[iconKey];
-                                                    const badgeClass = typeBadge[iconKey] || typeBadge.default;
-                                                    
-                                                    return (
-                                                        <TableRow key={name} className="group hover:bg-muted/20 transition-colors">
-                                                            <TableCell className="pl-6 py-4">
-                                                                <div className="flex items-center gap-3 cursor-pointer" onClick={() => setViewDoc({name, url: getFileUrl(url)})}>
-                                                                    <div className="w-10 h-10 rounded-xl bg-background border shadow-sm flex items-center justify-center flex-shrink-0 group-hover:border-primary/30 transition-colors">
-                                                                        <Icon className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-                                                                    </div>
-                                                                    <div>
-                                                                        <span className="text-sm font-semibold group-hover:text-primary transition-colors">{name}</span>
-                                                                        <div className="flex items-center gap-2 mt-1">
-                                                                            <Badge variant="outline" className={`text-[9px] px-1.5 py-0 rounded ${badgeClass}`}>
-                                                                                {name.split(" ")[0]}
-                                                                            </Badge>
-                                                                            <span className="text-xs text-muted-foreground">Click to view</span>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </TableCell>
-                                                            <TableCell className="pr-6 text-right">
-                                                                <Button 
-                                                                    variant="ghost" 
-                                                                    size="icon" 
-                                                                    className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                                    disabled={isDeleting}
-                                                                    onClick={(e) => { e.stopPropagation(); handleDeleteDoc(name); }}
-                                                                >
-                                                                    <Trash2 className="w-4 h-4" />
-                                                                </Button>
-                                                            </TableCell>
-                                                        </TableRow>
-                                                    );
-                                                })}
-                                            </TableBody>
-                                        </Table>
                                     </div>
                                 )}
-                            </CardContent>
-                        </Card>
-                    </div>
-                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+// ─── Edit Document Popup ──────────────────────────────────────────────────────
+
+interface EditDocPopupProps {
+    product: Product | null;
+    allIndividualCols: string[];
+    allPpapCols: string[];
+    onClose: () => void;
+    onUpload: (id: number, category: string, name: string, file: File) => Promise<Product | false>;
+    onDelete: (id: number, category: string, name: string) => Promise<Product | false>;
+    onMarkNotRequired: (id: number, category: string, name: string) => Promise<Product | false>;
+    onUnmarkNotRequired: (id: number, category: string, name: string) => Promise<Product | false>;
+}
+
+function EditDocPopup({
+    product,
+    allIndividualCols,
+    allPpapCols,
+    onClose,
+    onUpload,
+    onDelete,
+    onMarkNotRequired,
+    onUnmarkNotRequired,
+
+}: EditDocPopupProps) {
+    const [viewDoc, setViewDoc] = useState<{ name: string; url: string } | null>(null);
+    const [uploading, setUploading] = useState<string | null>(null);
+    const [deleting, setDeleting] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [pendingUpload, setPendingUpload] = useState<{ category: string; name: string } | null>(null);
+
+    if (!product) return null;
+    const docs = parseCategorizedDocs(product.ppap_documents);
+
+    const handleUploadClick = (category: string, name: string) => {
+        setPendingUpload({ category, name });
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !pendingUpload) return;
+        setUploading(`${pendingUpload.category}-${pendingUpload.name}`);
+        await onUpload(product.id, pendingUpload.category, pendingUpload.name, file);
+        setUploading(null);
+        setPendingUpload(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+
+    const handleDelete = async (category: string, name: string) => {
+        const key = `${category}-${name}`;
+        setDeleting(key);
+        await onDelete(product.id, category, name);
+        setDeleting(null);
+    };
+
+    const handleNotRequired = async (category: string, name: string) => {
+        await onMarkNotRequired(product.id, category, name);
+    };
+
+    const renderDocRow = (doc: string, category: string, categoryLabel: string, docsMap: Record<string, string>) => {
+        const path = findDocPath(docsMap, doc);
+        const notRequired = isNotRequired(path);
+        const hasDoc = path && !notRequired;
+        const key = `${category}-${doc}`;
+        const isUploading = uploading === key;
+        const isDeleting = deleting === key;
+
+        return (
+            <div
+                key={key}
+                className={`flex items-center justify-between px-4 py-3 rounded-xl mb-2 border transition-all ${
+                    notRequired
+                        ? "bg-muted/20 border-dashed border-muted-foreground/20 opacity-60"
+                        : hasDoc
+                        ? "bg-emerald-50/60 border-emerald-100"
+                        : "bg-muted/10 border-muted/30"
+                }`}
+            >
+                <div className="flex items-center gap-3 min-w-0">
+                    <Badge
+                        variant="outline"
+                        className={`text-[9px] px-1.5 h-4 shrink-0 ${
+                            categoryLabel === "Individual"
+                                ? "bg-blue-50 text-blue-700 border-blue-200"
+                                : "bg-purple-50 text-purple-700 border-purple-200"
+                        }`}
+                    >
+                        {categoryLabel}
+                    </Badge>
+                    <span className="text-sm font-semibold truncate">{doc}</span>
+                    {notRequired && (
+                        <span className="text-[10px] text-muted-foreground italic">Not Required</span>
+                    )}
+                    {hasDoc && (
+                        <span className="text-[10px] text-emerald-600 font-medium">✓ Uploaded</span>
+                    )}
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                    {hasDoc && (
+                        <button
+                            onClick={() => setViewDoc({ name: doc, url: getFileUrl(path!) })}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 transition-all"
+                            title="View"
+                        >
+                            <Eye className="w-3.5 h-3.5" />
+                        </button>
+                    )}
+                    {hasDoc && (
+                        <button
+                            onClick={() => handleDelete(category, doc)}
+                            disabled={isDeleting}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 transition-all disabled:opacity-40"
+                            title="Delete"
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                    )}
+                    {!notRequired && (
+                        <button
+                            onClick={() => handleUploadClick(category, doc)}
+                            disabled={isUploading}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 transition-all disabled:opacity-40"
+                            title={hasDoc ? "Re-upload" : "Upload"}
+                        >
+                            <Upload className="w-3.5 h-3.5" />
+                        </button>
+                    )}
+                    <button
+                        onClick={() =>
+                            notRequired
+                                ? onUnmarkNotRequired(product.id, category, doc)
+                                : onMarkNotRequired(product.id, category, doc)
+                        }
+                        className={`inline-flex items-center justify-center w-7 h-7 rounded-lg transition-all ${
+                            notRequired
+                                ? "bg-amber-50 hover:bg-amber-100 text-amber-600"
+                                : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
+                        }`}
+                        title={notRequired ? "Mark as Required" : "Mark as Not Required"}
+                    >
+                        <MinusCircle className="w-3.5 h-3.5" />
+                    </button>
+                </div>
             </div>
+        );
+    };
 
-            {/* Upload Document Modal */}
-            <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
-                <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                        <DialogTitle>Upload Document</DialogTitle>
-                        <DialogDescription>
-                            Add a new document for {product?.part_number}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                        <div className="grid gap-2">
-                            <Label htmlFor="docType">Document Type</Label>
-                            <Select value={uploadDocName} onValueChange={(val) => setUploadDocName(val || "")}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select type or type custom" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {DOCUMENT_TYPES.map(type => (
-                                        <SelectItem key={type} value={type}>{type}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            {/* Fallback for custom names if they want it */}
-                            <Input 
-                                placeholder="Or enter custom name..." 
-                                value={uploadDocName} 
-                                onChange={(e) => setUploadDocName(e.target.value)}
-                                className="mt-1"
-                            />
+    return (
+        <>
+            <Dialog open={!!product} onOpenChange={(open) => !open && onClose()}>
+                <DialogContent className="!max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+                    <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/10">
+                        <div>
+                            <DialogTitle className="text-base font-bold">
+                                Edit Documents —{" "}
+                                <span className="font-mono text-primary">{product.part_number}</span>
+                            </DialogTitle>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                {product.customer}
+                            </p>
                         </div>
-                        <div className="grid gap-2">
-                            <Label>File</Label>
-                            <div className="border-2 border-dashed rounded-xl p-6 text-center hover:bg-muted/40 transition-colors relative">
-                                <Input 
-                                    type="file" 
-                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                    onChange={(e) => {
-                                        if (e.target.files && e.target.files.length > 0) {
-                                            setSelectedFile(e.target.files[0]);
-                                        }
-                                    }}
-                                />
-                                {selectedFile ? (
-                                    <div className="flex items-center justify-between bg-background border rounded-lg p-3 relative z-10 pointer-events-none">
-                                        <div className="flex items-center gap-2 truncate">
-                                            <FileText className="w-4 h-4 text-primary" />
-                                            <span className="text-sm font-medium truncate max-w-[200px]">{selectedFile.name}</span>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <Upload className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
-                                        <p className="text-sm text-foreground font-medium">Click or drag file to upload</p>
-                                        <p className="text-xs text-muted-foreground mt-1">PDF, Excel, Images (Max 10MB)</p>
-                                    </>
-                                )}
-                            </div>
-                        </div>
+                        <button
+                            onClick={onClose}
+                            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
                     </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsUploadOpen(false)} disabled={isUploading}>
-                            Cancel
-                        </Button>
-                        <Button onClick={handleUploadSubmit} disabled={isUploading || !uploadDocName || !selectedFile}>
-                            {isUploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                            Upload Document
-                        </Button>
-                    </DialogFooter>
+                    <div className="flex-1 overflow-y-auto px-6 py-4">
+                        <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
+                            Individual Documents
+                        </p>
+                        {allIndividualCols.map((doc) =>
+                            renderDocRow(doc, "individual", "Individual", docs.individual)
+                        )}
+                        <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mt-5 mb-3">
+                            PPAP Documents
+                        </p>
+                        {allPpapCols.map((doc) =>
+                            renderDocRow(doc, "ppap", "PPAP", docs.ppap)
+                        )}
+                    </div>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        className="hidden"
+                        onChange={handleFileChange}
+                        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                    />
                 </DialogContent>
             </Dialog>
 
-            {/* View Document Modal */}
+            {/* Nested doc viewer */}
             <Dialog open={!!viewDoc} onOpenChange={(open) => !open && setViewDoc(null)}>
                 <DialogContent className="!max-w-4xl h-[90vh] flex flex-col p-0 overflow-hidden">
-                    <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/20">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                                <Eye className="w-5 h-5 text-primary" />
-                            </div>
-                            <div>
-                                <DialogTitle className="text-lg">{viewDoc?.name}</DialogTitle>
-                                <p className="text-sm text-muted-foreground">{product?.part_number}</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2 mx-4">
-                            <Button 
-                                variant="destructive" 
-                                size="sm" 
-                                className="gap-2"
-                                disabled={isDeleting}
-                                onClick={() => viewDoc && handleDeleteDoc(viewDoc.name)}
-                            >
-                                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                                Delete
-                            </Button>
-
-                        </div>
+                    <div className="flex items-center gap-3 px-6 py-4 border-b bg-muted/10">
+                        <Eye className="w-5 h-5 text-primary" />
+                        <DialogTitle>{viewDoc?.name}</DialogTitle>
                     </div>
-                    <div className="flex-1 bg-muted/10 p-4 relative overflow-auto">
+                    <div className="flex-1 p-4 bg-muted/10">
                         {viewDoc && (
-                            <div className="w-full h-full min-h-[500px] bg-background border rounded-xl shadow-sm overflow-hidden flex items-center justify-center">
+                            <div className="w-full h-full min-h-[500px] bg-background border rounded-xl overflow-hidden flex items-center justify-center">
                                 {viewDoc.url.match(/\.(jpeg|jpg|gif|png)$/i) ? (
-                                    <img src={viewDoc.url} alt={viewDoc.name} className="max-w-full max-h-full object-contain p-4" />
+                                    <img
+                                        src={viewDoc.url}
+                                        alt={viewDoc.name}
+                                        className="max-w-full max-h-full object-contain p-4"
+                                    />
                                 ) : (
-                                    <iframe 
-                                        src={viewDoc.url} 
+                                    <iframe
+                                        src={viewDoc.url}
                                         className="w-full h-full border-0"
                                         title={viewDoc.name}
                                     />
@@ -434,6 +490,962 @@ export default function DocumentsPage() {
                     </div>
                 </DialogContent>
             </Dialog>
+        </>
+    );
+}
+
+// ─── Non-Admin Search View ────────────────────────────────────────────────────
+
+function NonAdminView({
+    products,
+    allowedDocNames,
+}: {
+    products: Product[];
+    allowedDocNames: string[];
+}) {
+    const [query, setQuery] = useState("");
+    const [viewDoc, setViewDoc] = useState<{ name: string; url: string } | null>(null);
+
+    // Map allowed doc names to display labels
+    const allowedLabels = useMemo(
+        () => allowedDocNames.map((k) => DOC_NAME_LABEL_MAP[k] || k),
+        [allowedDocNames]
+    );
+
+    const results = useMemo(() => {
+        if (!query.trim()) return [];
+        const q = query.toLowerCase();
+        return products.filter((p) =>
+            (p.part_number || "").toLowerCase().includes(q)
+        );
+    }, [products, query]);
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h1 className="text-2xl font-bold tracking-tight">Documents</h1>
+                <p className="text-sm text-muted-foreground mt-1">
+                    Search for a part number to view available documents
+                </p>
+            </div>
+
+            <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                    placeholder="Search by part number..."
+                    className="pl-9 h-10 text-sm"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                />
+            </div>
+
+            {results.length > 0 && (
+                <div className="space-y-3">
+                    {results.map((product) => {
+                        const docs = parseCategorizedDocs(product.ppap_documents);
+                        const allDocs = { ...docs.individual, ...docs.ppap };
+
+                        return (
+                            <Card key={product.id} className="border-0 shadow-sm">
+                                <CardContent className="p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div>
+                                            <p className="font-mono font-bold text-sm">
+                                                {product.part_number}
+                                            </p>
+                                            <p className="text-xs text-muted-foreground">
+                                                {product.customer}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {allowedLabels.map((label) => {
+                                            const path = findDocPath(allDocs, label);
+                                            if (!path || isNotRequired(path)) return null;
+                                            return (
+                                                <button
+                                                    key={label}
+                                                    onClick={() =>
+                                                        setViewDoc({
+                                                            name: label,
+                                                            url: getFileUrl(path),
+                                                        })
+                                                    }
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all border border-blue-100"
+                                                >
+                                                    <FileText className="w-3.5 h-3.5" />
+                                                    {label}
+                                                </button>
+                                            );
+                                        })}
+                                        {allowedLabels.every((label) => {
+                                            const path = findDocPath(allDocs, label);
+                                            return !path || isNotRequired(path);
+                                        }) && (
+                                            <p className="text-xs text-muted-foreground italic">
+                                                No documents available for your access level.
+                                            </p>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        );
+                    })}
+                </div>
+            )}
+
+            {query.trim() && results.length === 0 && (
+                <div className="text-center text-sm text-muted-foreground py-8">
+                    No products found for "{query}".
+                </div>
+            )}
+
+            {/* Viewer */}
+            <Dialog open={!!viewDoc} onOpenChange={(open) => !open && setViewDoc(null)}>
+                <DialogContent className="!max-w-4xl h-[90vh] flex flex-col p-0 overflow-hidden">
+                    <div className="flex items-center gap-3 px-6 py-4 border-b bg-muted/10">
+                        <Eye className="w-5 h-5 text-primary" />
+                        <DialogTitle>{viewDoc?.name}</DialogTitle>
+                    </div>
+                    <div className="flex-1 p-4 bg-muted/10">
+                        {viewDoc && (
+                            <div className="w-full h-full min-h-[500px] bg-background border rounded-xl overflow-hidden flex items-center justify-center">
+                                {viewDoc.url.match(/\.(jpeg|jpg|gif|png)$/i) ? (
+                                    <img
+                                        src={viewDoc.url}
+                                        alt={viewDoc.name}
+                                        className="max-w-full max-h-full object-contain p-4"
+                                    />
+                                ) : (
+                                    <iframe
+                                        src={viewDoc.url}
+                                        className="w-full h-full border-0"
+                                        title={viewDoc.name}
+                                    />
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export default function DocumentsPage() {
+    const { products, loading, uploadDocument, deleteDocument, markDocumentNotRequired } = useProducts();
+    const { user } = useUser(); // { role, document_name_array, ... }
+
+    const isAdminOrSuper =
+        user?.role === "admin" || user?.role === "super admin";
+
+    const [searchQuery, setSearchQuery] = useState("");
+    const [viewDoc, setViewDoc] = useState<{
+        name: string;
+        url: string;
+        category: string;
+    } | null>(null);
+    const [editProduct, setEditProduct] = useState<Product | null>(null);
+    const [currentPage, setCurrentPage] = useState(1);
+
+    // Extra columns from data
+    const { extraIndividual, extraPpap } = useMemo(() => {
+        const indSet = new Set<string>();
+        const ppapSet = new Set<string>();
+        const indPredefined = new Set(INDIVIDUAL_DOCS.map((d) => d.toLowerCase()));
+        const ppapPredefined = new Set(PPAP_DOCS.map((d) => d.toLowerCase()));
+
+        products.forEach((p) => {
+            const docs = parseCategorizedDocs(p.ppap_documents);
+            Object.keys(docs.individual).forEach((key) => {
+                if (!indPredefined.has(key.toLowerCase())) indSet.add(key);
+            });
+            Object.keys(docs.ppap).forEach((key) => {
+                if (!ppapPredefined.has(key.toLowerCase())) ppapSet.add(key);
+            });
+        });
+
+        return {
+            extraIndividual: Array.from(indSet).sort(),
+            extraPpap: Array.from(ppapSet).sort(),
+        };
+    }, [products]);
+
+    const allIndividualCols = useMemo(
+        () => [...INDIVIDUAL_DOCS, ...extraIndividual],
+        [extraIndividual]
+    );
+    const allPpapCols = useMemo(
+        () => [...PPAP_DOCS, ...extraPpap],
+        [extraPpap]
+    );
+
+    const vacancyItems = useVacancySummary(products, allIndividualCols, allPpapCols);
+
+    const filteredProducts = useMemo(() => {
+        if (!searchQuery.trim()) return products;
+        const q = searchQuery.toLowerCase();
+        return products.filter(
+            (p) =>
+                (p.part_number || "").toLowerCase().includes(q) ||
+                (p.customer || "").toLowerCase().includes(q)
+        );
+    }, [products, searchQuery]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredProducts.length / RECORDS_PER_PAGE));
+    const safeCurrentPage = Math.min(currentPage, totalPages);
+    const paginatedProducts = useMemo(() => {
+        const start = (safeCurrentPage - 1) * RECORDS_PER_PAGE;
+        return filteredProducts.slice(start, start + RECORDS_PER_PAGE);
+    }, [filteredProducts, safeCurrentPage]);
+
+    const handleSearchChange = useCallback((val: string) => {
+        setSearchQuery(val);
+        setCurrentPage(1);
+    }, []);
+
+    const totalDocCount = useMemo(() => {
+        let count = 0;
+        products.forEach((p) => {
+            const docs = parseCategorizedDocs(p.ppap_documents);
+            count +=
+                Object.keys(docs.individual).length +
+                Object.keys(docs.ppap).length;
+        });
+        return count;
+    }, [products]);
+
+    const productsWithDocsCount = useMemo(
+        () =>
+            products.filter((p) => {
+                const docs = parseCategorizedDocs(p.ppap_documents);
+                return (
+                    Object.keys(docs.individual).length +
+                        Object.keys(docs.ppap).length >
+                    0
+                );
+            }).length,
+        [products]
+    );
+
+    const handleDownloadExcel = useCallback(async () => {
+        const ExcelJS = (await import("exceljs")).default;
+        const { saveAs } = await import("file-saver");
+
+        const wb = new ExcelJS.Workbook();
+        wb.creator = "Documents System";
+        wb.created = new Date();
+
+        const ws = wb.addWorksheet("Documents", {
+            views: [{ state: "frozen", xSplit: 2, ySplit: 3 }],
+        });
+
+        // ── Palette ────────────────────────────────────────────────────────
+        const C = {
+            // Header rows
+            titleBg:     "FF1E293B", // slate-900
+            titleFg:     "FFFFFFFF",
+            indBg:       "FF1D4ED8", // blue-700
+            indFg:       "FFFFFFFF",
+            ppapBg:      "FF6D28D9", // violet-700
+            ppapFg:      "FFFFFFFF",
+            subIndBg:    "FFBFDBFE", // blue-100
+            subIndFg:    "FF1E40AF",
+            subPpapBg:   "FFEDE9FE", // violet-100
+            subPpapFg:   "FF4C1D95",
+            // Data rows
+            rowEven:     "FFFAFAFA",
+            rowOdd:      "FFFFFFFF",
+            partFg:      "FF0F172A",
+            customerFg:  "FF64748B",
+            // Cell states
+            uploaded:    "FFD1FAE5", // emerald-100
+            uploadedFg:  "FF065F46",
+            missing:     "FFFEF2F2", // red-50  ← eye-catching vacant
+            missingFg:   "FFB91C1C",
+            missingBdr:  "FFFCA5A5", // red-300
+            notReq:      "FFF1F5F9", // slate-100
+            notReqFg:    "FF94A3B8",
+        };
+
+        const font = (bold = false, color = "FF0F172A", size = 9) =>
+            ({ name: "Calibri", bold, color: { argb: color }, size }) as ExcelJS.Font;
+
+        const fill = (argb: string): ExcelJS.Fill =>
+            ({ type: "pattern", pattern: "solid", fgColor: { argb } }) as ExcelJS.Fill;
+
+        const border = (color = "FFE2E8F0"): Partial<ExcelJS.Borders> => ({
+            top:    { style: "thin", color: { argb: color } },
+            bottom: { style: "thin", color: { argb: color } },
+            left:   { style: "thin", color: { argb: color } },
+            right:  { style: "thin", color: { argb: color } },
+        });
+
+        const totalCols = 2 + allIndividualCols.length + allPpapCols.length;
+
+        // ── Row 1 — main title spanning full width ─────────────────────────
+        ws.addRow([]);
+        const titleRow = ws.getRow(1);
+        titleRow.getCell(1).value = "Product Documents Report";
+        titleRow.getCell(1).font = { ...font(true, C.titleFg, 13) };
+        titleRow.getCell(1).fill = fill(C.titleBg);
+        titleRow.getCell(1).alignment = { vertical: "middle", horizontal: "center" };
+        ws.mergeCells(1, 1, 1, totalCols);
+        titleRow.height = 28;
+
+        // ── Row 2 — category header (Individual | PPAP) ────────────────────
+        ws.addRow([]);
+        const catRow = ws.getRow(2);
+        catRow.height = 20;
+
+        // Part Number + Customer merge placeholder
+        catRow.getCell(1).value = "";
+        catRow.getCell(1).fill = fill(C.titleBg);
+        catRow.getCell(2).fill = fill(C.titleBg);
+        ws.mergeCells(2, 1, 2, 2);
+
+        // Individual header
+        const indStart = 3;
+        const indEnd   = 2 + allIndividualCols.length;
+        catRow.getCell(indStart).value = "INDIVIDUAL DOCUMENTS";
+        catRow.getCell(indStart).font  = font(true, C.indFg, 9);
+        catRow.getCell(indStart).fill  = fill(C.indBg);
+        catRow.getCell(indStart).alignment = { horizontal: "center", vertical: "middle" };
+        if (indEnd > indStart) ws.mergeCells(2, indStart, 2, indEnd);
+
+        // PPAP header
+        const ppapStart = indEnd + 1;
+        const ppapEnd   = totalCols;
+        catRow.getCell(ppapStart).value = "PPAP DOCUMENTS";
+        catRow.getCell(ppapStart).font  = font(true, C.ppapFg, 9);
+        catRow.getCell(ppapStart).fill  = fill(C.ppapBg);
+        catRow.getCell(ppapStart).alignment = { horizontal: "center", vertical: "middle" };
+        if (ppapEnd > ppapStart) ws.mergeCells(2, ppapStart, 2, ppapEnd);
+
+        // ── Row 3 — column name headers ────────────────────────────────────
+        const headerValues = [
+            "Part Number",
+            "Customer",
+            ...allIndividualCols,
+            ...allPpapCols,
+        ];
+        ws.addRow(headerValues);
+        const hdrRow = ws.getRow(3);
+        hdrRow.height = 32;
+        hdrRow.eachCell((cell, col) => {
+            const isInd  = col >= indStart && col <= indEnd;
+            const isPpap = col >= ppapStart;
+            const isMeta = col <= 2;
+            cell.font = font(
+                true,
+                isMeta ? C.titleFg : isInd ? C.subIndFg : C.subPpapFg,
+                9
+            );
+            cell.fill = fill(
+                isMeta ? C.titleBg : isInd ? C.subIndBg : C.subPpapBg
+            );
+            cell.alignment = {
+                horizontal: "center",
+                vertical: "middle",
+                wrapText: true,
+            };
+            cell.border = border(isMeta ? "FF334155" : isInd ? "FF93C5FD" : "FFC4B5FD");
+        });
+
+        // ── Data rows ──────────────────────────────────────────────────────
+        filteredProducts.forEach((product, rowIdx) => {
+            const docs   = parseCategorizedDocs(product.ppap_documents);
+            const isEven = rowIdx % 2 === 0;
+            const rowBg  = isEven ? C.rowEven : C.rowOdd;
+
+            const values: string[] = [
+                product.part_number || "",
+                product.customer    || "",
+            ];
+
+            // Build status arrays for styling after adding the row
+            const statuses: Array<"uploaded" | "missing" | "notreq"> = [];
+
+            allIndividualCols.forEach((doc) => {
+                const path = findDocPath(docs.individual, doc);
+                if (!path) {
+                    values.push("MISSING");
+                    statuses.push("missing");
+                } else if (isNotRequired(path)) {
+                    values.push("N/R");
+                    statuses.push("notreq");
+                } else {
+                    values.push("✓");
+                    statuses.push("uploaded");
+                }
+            });
+
+            allPpapCols.forEach((doc) => {
+                const path = findDocPath(docs.ppap, doc);
+                if (!path) {
+                    values.push("MISSING");
+                    statuses.push("missing");
+                } else if (isNotRequired(path)) {
+                    values.push("N/R");
+                    statuses.push("notreq");
+                } else {
+                    values.push("✓");
+                    statuses.push("uploaded");
+                }
+            });
+
+            ws.addRow(values);
+            const dataRow = ws.getRow(3 + rowIdx + 1); // +1 because rows are 1-indexed and we added 3 header rows
+            dataRow.height = 18;
+
+            // Part Number cell
+            const pnCell = dataRow.getCell(1);
+            pnCell.font = font(true, C.partFg, 9);
+            pnCell.fill = fill(rowBg);
+            pnCell.alignment = { vertical: "middle" };
+            pnCell.border = border("FFE2E8F0");
+
+            // Customer cell
+            const custCell = dataRow.getCell(2);
+            custCell.font = font(false, C.customerFg, 8);
+            custCell.fill = fill(rowBg);
+            custCell.alignment = { vertical: "middle" };
+            custCell.border = border("FFE2E8F0");
+
+            // Document cells
+            statuses.forEach((status, i) => {
+                const cell = dataRow.getCell(3 + i);
+                cell.alignment = { horizontal: "center", vertical: "middle" };
+
+                if (status === "uploaded") {
+                    cell.font   = font(true,  C.uploadedFg, 9);
+                    cell.fill   = fill(C.uploaded);
+                    cell.border = border("FF6EE7B7");
+                } else if (status === "missing") {
+                    cell.font   = font(true,  C.missingFg, 9);
+                    cell.fill   = fill(C.missing);
+                    cell.border = {
+                        top:    { style: "medium", color: { argb: C.missingBdr } },
+                        bottom: { style: "medium", color: { argb: C.missingBdr } },
+                        left:   { style: "medium", color: { argb: C.missingBdr } },
+                        right:  { style: "medium", color: { argb: C.missingBdr } },
+                    };
+                } else {
+                    cell.font   = font(false, C.notReqFg, 8);
+                    cell.fill   = fill(C.notReq);
+                    cell.border = border("FFCBD5E1");
+                }
+            });
+        });
+
+        // ── Column widths ──────────────────────────────────────────────────
+        ws.getColumn(1).width = 18; // Part Number
+        ws.getColumn(2).width = 20; // Customer
+        for (let i = 3; i <= totalCols; i++) {
+            ws.getColumn(i).width = 12;
+        }
+
+        // ── Legend sheet ───────────────────────────────────────────────────
+        const legend = wb.addWorksheet("Legend");
+        legend.getColumn(1).width = 20;
+        legend.getColumn(2).width = 40;
+
+        const addLegendRow = (
+            label: string,
+            desc: string,
+            bgArgb: string,
+            fgArgb: string
+        ) => {
+            legend.addRow([label, desc]);
+            const r = legend.lastRow!;
+            r.height = 18;
+            [1, 2].forEach((c) => {
+                r.getCell(c).fill = fill(bgArgb);
+                r.getCell(c).font = font(c === 1, fgArgb, 10);
+                r.getCell(c).alignment = { vertical: "middle" };
+                r.getCell(c).border = border("FFE2E8F0");
+            });
+        };
+
+        legend.addRow(["Legend", ""]);
+        const legendTitle = legend.getRow(1);
+        legendTitle.getCell(1).value = "Colour Legend";
+        legendTitle.getCell(1).font  = font(true, C.titleFg, 12);
+        legendTitle.getCell(1).fill  = fill(C.titleBg);
+        legendTitle.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+        legendTitle.height = 24;
+        legend.mergeCells(1, 1, 1, 2);
+
+        addLegendRow("✓  Uploaded",  "Document has been uploaded successfully", C.uploaded, C.uploadedFg);
+        addLegendRow("MISSING",      "Document is required but not yet uploaded", C.missing,  C.missingFg);
+        addLegendRow("N/R",          "Document marked as Not Required",          C.notReq,   C.notReqFg);
+
+        // ── Save ───────────────────────────────────────────────────────────
+        const buf = await wb.xlsx.writeBuffer();
+        saveAs(new Blob([buf], { type: "application/octet-stream" }), "product_documents.xlsx");
+    }, [filteredProducts, allIndividualCols, allPpapCols]);
+
+    // Mark a document as not required — calls PATCH /products/:id/documents/:category/:name/not-required
+    const handleMarkNotRequired = useCallback(
+        async (id: number, category: string, name: string) => {
+            return markDocumentNotRequired(id, category, name);
+        },
+        [markDocumentNotRequired]
+    );
+
+    // Unmark not-required by deleting the sentinel entry (no file on disk to remove)
+    const handleUnmarkNotRequired = useCallback(
+        async (id: number, category: string, name: string) => {
+            return deleteDocument(id, category, name);
+        },
+        [deleteDocument]
+    );
+
+    if (loading) {
+        return (
+            <DashboardLayout>
+                <div className="p-8 text-center text-muted-foreground">Loading...</div>
+            </DashboardLayout>
+        );
+    }
+
+    // ── Non-admin view ──────────────────────────────────────────────────────
+    if (!isAdminOrSuper) {
+        return (
+            <DashboardLayout>
+                <NonAdminView
+                    products={products}
+                    allowedDocNames={user?.document_name_array || []}
+                />
+            </DashboardLayout>
+        );
+    }
+
+    // ── Admin / Super Admin view ────────────────────────────────────────────
+    return (
+        <DashboardLayout>
+            <div className="space-y-6">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight">Documents</h1>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            View and manage product documentation across all products
+                        </p>
+                    </div>
+                </div>
+
+                {/* Vacancy banner */}
+                <VacancyBanner items={vacancyItems} />
+
+                {/* Stats */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <Card className="border-0 shadow-sm">
+                        <CardContent className="p-4 flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                                <span className="text-lg font-bold text-blue-600">
+                                    {products.length}
+                                </span>
+                            </div>
+                            <span className="text-sm font-medium text-muted-foreground">
+                                Total Products
+                            </span>
+                        </CardContent>
+                    </Card>
+                    <Card className="border-0 shadow-sm">
+                        <CardContent className="p-4 flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
+                                <span className="text-lg font-bold text-emerald-600">
+                                    {productsWithDocsCount}
+                                </span>
+                            </div>
+                            <span className="text-sm font-medium text-muted-foreground">
+                                Products with Docs
+                            </span>
+                        </CardContent>
+                    </Card>
+                    <Card className="border-0 shadow-sm">
+                        <CardContent className="p-4 flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
+                                <span className="text-lg font-bold text-purple-600">
+                                    {totalDocCount}
+                                </span>
+                            </div>
+                            <span className="text-sm font-medium text-muted-foreground">
+                                Total Documents
+                            </span>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                {/* Search + Download */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <div className="relative flex-1 max-w-md">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                            placeholder="Search by part number or customer..."
+                            className="pl-9 h-9 bg-muted/30 border-transparent focus:border-primary/30 text-sm"
+                            value={searchQuery}
+                            onChange={(e) => handleSearchChange(e.target.value)}
+                        />
+                    </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 shadow-sm h-9"
+                        onClick={handleDownloadExcel}
+                    >
+                        <Download className="w-4 h-4" />
+                        Download Excel
+                    </Button>
+                </div>
+
+                {/* Documents Table */}
+                <Card className="border-0 shadow-sm overflow-hidden">
+                    <CardContent className="p-0">
+                        <div className="overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow className="bg-muted/20 hover:bg-muted/20 border-b-0">
+                                        <TableHead
+                                            rowSpan={2}
+                                            className="text-xs font-bold uppercase tracking-wider text-muted-foreground h-10 pl-4 sticky left-0 z-20 bg-muted/20 border-r min-w-[160px] align-bottom pb-3"
+                                        >
+                                            Part Number
+                                        </TableHead>
+                                        {/* Edit column header */}
+                                        <TableHead
+                                            rowSpan={2}
+                                            className="text-xs font-bold uppercase tracking-wider text-muted-foreground h-10 sticky left-[160px] z-20 bg-muted/20 border-r min-w-[60px] align-bottom pb-3 text-center"
+                                        >
+                                            Edit
+                                        </TableHead>
+                                        <TableHead
+                                            colSpan={allIndividualCols.length}
+                                            className="text-center text-xs font-bold uppercase tracking-wider h-8 border-b-0 border-r"
+                                        >
+                                            <div className="flex items-center justify-center gap-1.5">
+                                                <Badge
+                                                    variant="secondary"
+                                                    className="bg-blue-100 text-blue-800 text-[10px] font-semibold px-2"
+                                                >
+                                                    Individual
+                                                </Badge>
+                                            </div>
+                                        </TableHead>
+                                        <TableHead
+                                            colSpan={allPpapCols.length}
+                                            className="text-center text-xs font-bold uppercase tracking-wider h-8 border-b-0"
+                                        >
+                                            <div className="flex items-center justify-center gap-1.5">
+                                                <Badge
+                                                    variant="secondary"
+                                                    className="bg-purple-100 text-purple-800 text-[10px] font-semibold px-2"
+                                                >
+                                                    PPAP
+                                                </Badge>
+                                            </div>
+                                        </TableHead>
+                                    </TableRow>
+                                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                                        {allIndividualCols.map((doc, i) => (
+                                            <TableHead
+                                                key={`ind-${doc}`}
+                                                className={`text-[10px] font-semibold uppercase tracking-wider text-blue-800/70 h-10 text-center min-w-[80px] px-2 whitespace-nowrap ${
+                                                    i === allIndividualCols.length - 1
+                                                        ? "border-r"
+                                                        : ""
+                                                }`}
+                                            >
+                                                {doc}
+                                            </TableHead>
+                                        ))}
+                                        {allPpapCols.map((doc) => (
+                                            <TableHead
+                                                key={`ppap-${doc}`}
+                                                className="text-[10px] font-semibold uppercase tracking-wider text-purple-800/70 h-10 text-center min-w-[80px] px-2 whitespace-nowrap"
+                                            >
+                                                {doc}
+                                            </TableHead>
+                                        ))}
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {paginatedProducts.map((product) => {
+                                        const docs = parseCategorizedDocs(
+                                            product.ppap_documents
+                                        );
+
+                                        return (
+                                            <TableRow
+                                                key={product.id}
+                                                className="group hover:bg-muted/10 transition-colors"
+                                            >
+                                                {/* Part number sticky cell */}
+                                                <TableCell className="pl-4 font-mono font-semibold text-sm sticky left-0 z-10 bg-background group-hover:bg-muted/10 transition-colors border-r whitespace-nowrap min-w-[160px]">
+                                                    <div>
+                                                        <span>{product.part_number}</span>
+                                                        <p className="text-[10px] text-muted-foreground font-normal font-sans truncate max-w-[130px]">
+                                                            {product.customer}
+                                                        </p>
+                                                    </div>
+                                                </TableCell>
+                                                {/* Edit button sticky cell */}
+                                                <TableCell className="text-center sticky left-[160px] z-10 bg-background group-hover:bg-muted/10 transition-colors border-r px-2">
+                                                    <button
+                                                        onClick={() => setEditProduct(product)}
+                                                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-muted/60 hover:bg-primary/10 hover:text-primary text-muted-foreground transition-all"
+                                                        title="Edit documents"
+                                                    >
+                                                        <Pencil className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </TableCell>
+                                                {/* Individual doc cells */}
+                                                {allIndividualCols.map((doc, i) => {
+                                                    const path = findDocPath(docs.individual, doc);
+                                                    const notReq = isNotRequired(path);
+                                                    return (
+                                                        <TableCell
+                                                            key={`ind-${doc}`}
+                                                            className={`text-center px-2 ${
+                                                                i === allIndividualCols.length - 1
+                                                                    ? "border-r"
+                                                                    : ""
+                                                            }`}
+                                                        >
+                                                            {notReq ? (
+                                                                <span
+                                                                    className="text-muted-foreground/40 text-xs"
+                                                                    title="Not Required"
+                                                                >
+                                                                    N/R
+                                                                </span>
+                                                            ) : path ? (
+                                                                <button
+                                                                    onClick={() =>
+                                                                        setViewDoc({
+                                                                            name: doc,
+                                                                            url: getFileUrl(path),
+                                                                            category: "Individual",
+                                                                        })
+                                                                    }
+                                                                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-800 transition-all hover:scale-110 cursor-pointer"
+                                                                    title={`View ${doc}`}
+                                                                >
+                                                                    <FileText className="w-4 h-4" />
+                                                                </button>
+                                                            ) : (
+                                                                <span className="text-muted-foreground/30 text-xs">
+                                                                    —
+                                                                </span>
+                                                            )}
+                                                        </TableCell>
+                                                    );
+                                                })}
+                                                {/* PPAP doc cells */}
+                                                {allPpapCols.map((doc) => {
+                                                    const path = findDocPath(docs.ppap, doc);
+                                                    const notReq = isNotRequired(path);
+                                                    return (
+                                                        <TableCell
+                                                            key={`ppap-${doc}`}
+                                                            className="text-center px-2"
+                                                        >
+                                                            {notReq ? (
+                                                                <span
+                                                                    className="text-muted-foreground/40 text-xs"
+                                                                    title="Not Required"
+                                                                >
+                                                                    N/R
+                                                                </span>
+                                                            ) : path ? (
+                                                                <button
+                                                                    onClick={() =>
+                                                                        setViewDoc({
+                                                                            name: doc,
+                                                                            url: getFileUrl(path),
+                                                                            category: "PPAP",
+                                                                        })
+                                                                    }
+                                                                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 hover:text-purple-800 transition-all hover:scale-110 cursor-pointer"
+                                                                    title={`View ${doc}`}
+                                                                >
+                                                                    <FileText className="w-4 h-4" />
+                                                                </button>
+                                                            ) : (
+                                                                <span className="text-muted-foreground/30 text-xs">
+                                                                    —
+                                                                </span>
+                                                            )}
+                                                        </TableCell>
+                                                    );
+                                                })}
+                                            </TableRow>
+                                        );
+                                    })}
+                                    {paginatedProducts.length === 0 && (
+                                        <TableRow>
+                                            <TableCell
+                                                colSpan={
+                                                    2 +
+                                                    allIndividualCols.length +
+                                                    allPpapCols.length
+                                                }
+                                                className="h-32 text-center text-muted-foreground"
+                                            >
+                                                No products found.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                        {/* Pagination */}
+                        <div className="px-4 py-3 border-t flex flex-col sm:flex-row items-center justify-between gap-2">
+                            <span className="text-xs text-muted-foreground">
+                                Showing{" "}
+                                {(safeCurrentPage - 1) * RECORDS_PER_PAGE + 1}–
+                                {Math.min(
+                                    safeCurrentPage * RECORDS_PER_PAGE,
+                                    filteredProducts.length
+                                )}{" "}
+                                of {filteredProducts.length} products
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    disabled={safeCurrentPage <= 1}
+                                    onClick={() =>
+                                        setCurrentPage((p) => Math.max(1, p - 1))
+                                    }
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </Button>
+                                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                    .filter((page) => {
+                                        if (page === 1 || page === totalPages) return true;
+                                        if (Math.abs(page - safeCurrentPage) <= 1) return true;
+                                        return false;
+                                    })
+                                    .reduce<(number | "ellipsis")[]>(
+                                        (acc, page, idx, arr) => {
+                                            if (
+                                                idx > 0 &&
+                                                page - (arr[idx - 1] as number) > 1
+                                            ) {
+                                                acc.push("ellipsis");
+                                            }
+                                            acc.push(page);
+                                            return acc;
+                                        },
+                                        []
+                                    )
+                                    .map((item, idx) =>
+                                        item === "ellipsis" ? (
+                                            <span
+                                                key={`e-${idx}`}
+                                                className="px-1 text-xs text-muted-foreground"
+                                            >
+                                                …
+                                            </span>
+                                        ) : (
+                                            <Button
+                                                key={item}
+                                                variant={
+                                                    safeCurrentPage === item
+                                                        ? "default"
+                                                        : "outline"
+                                                }
+                                                size="icon"
+                                                className="h-8 w-8 text-xs"
+                                                onClick={() =>
+                                                    setCurrentPage(item as number)
+                                                }
+                                            >
+                                                {item}
+                                            </Button>
+                                        )
+                                    )}
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    disabled={safeCurrentPage >= totalPages}
+                                    onClick={() =>
+                                        setCurrentPage((p) => Math.min(totalPages, p + 1))
+                                    }
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </Button>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Document Viewer */}
+            <Dialog
+                open={!!viewDoc}
+                onOpenChange={(open) => !open && setViewDoc(null)}
+            >
+                <DialogContent className="!max-w-4xl h-[90vh] flex flex-col p-0 overflow-hidden">
+                    <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/20">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                                <Eye className="w-5 h-5 text-primary" />
+                            </div>
+                            <div>
+                                <DialogTitle className="text-lg">
+                                    {viewDoc?.name}
+                                </DialogTitle>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                    <Badge
+                                        variant="outline"
+                                        className="text-[9px] px-1.5 h-4"
+                                    >
+                                        {viewDoc?.category}
+                                    </Badge>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex-1 bg-muted/10 p-4 relative overflow-auto">
+                        {viewDoc && (
+                            <div className="w-full h-full min-h-[500px] bg-background border rounded-xl shadow-sm overflow-hidden flex items-center justify-center">
+                                {viewDoc.url.match(/\.(jpeg|jpg|gif|png)$/i) ? (
+                                    <img
+                                        src={viewDoc.url}
+                                        alt={viewDoc.name}
+                                        className="max-w-full max-h-full object-contain p-4"
+                                    />
+                                ) : (
+                                    <iframe
+                                        src={viewDoc.url}
+                                        className="w-full h-full border-0"
+                                        title={viewDoc.name}
+                                    />
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Edit Document Popup */}
+            <EditDocPopup
+                product={editProduct}
+                allIndividualCols={allIndividualCols}
+                allPpapCols={allPpapCols}
+                onClose={() => setEditProduct(null)}
+                onUpload={uploadDocument}
+                onDelete={deleteDocument}
+                onMarkNotRequired={handleMarkNotRequired}
+                onUnmarkNotRequired={handleUnmarkNotRequired}
+            />
         </DashboardLayout>
     );
 }

@@ -21,15 +21,16 @@ import {
     BarChart3,
 } from "lucide-react";
 import { useState } from "react";
+import { useUser } from "@/contexts/UserContext";
+import { hasAccess } from "@/lib/rbac";
 
 const menuItems = [
     { label: "Dashboard", icon: LayoutDashboard, href: "/" },
     { label: "Product Master", icon: Package, href: "/product-master" },
-    { label: "Approvals", icon: CheckCircle2, href: "/approvals" },
+    { label: "Production Approval", icon: CheckCircle2, href: "/approvals" },
     { label: "Production Verification", icon: ClipboardCheck, href: "/production-verification" },
     { label: "Quality Verification", icon: ShieldCheck, href: "/quality-verification" },
     { label: "Documents", icon: FileText, href: "/documents" },
-    { label: "Control Plan", icon: ListChecks, href: "/control-plan" },
     { label: "Product Specifications", icon: ClipboardCheck, href: "/product-specifications" },
     { label: "Dynamic Fields", icon: Sliders, href: "/dynamic-fields" },
     { label: "Scanned Products", icon: BarChart3, href: "/scanned-products" },
@@ -40,6 +41,7 @@ const menuItems = [
 export function Sidebar() {
     const pathname = usePathname();
     const [collapsed, setCollapsed] = useState(false);
+    const { user, logout } = useUser();
 
     return (
         <aside
@@ -59,6 +61,11 @@ export function Sidebar() {
             {/* Navigation */}
             <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
                 {menuItems.map((item) => {
+                    // Check if current user has access to this specific menu item
+                    if (!hasAccess(user?.role, item.href)) {
+                        return null;
+                    }
+
                     const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
                     return (
                         <Link
@@ -100,6 +107,7 @@ export function Sidebar() {
             {/* Logout */}
             <div className="px-3 pb-4">
                 <button
+                    onClick={() => logout()}
                     className={cn(
                         "flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-sidebar-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 w-full",
                         collapsed && "justify-center px-0"

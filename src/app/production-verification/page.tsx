@@ -8,20 +8,20 @@ import { Label } from "@/components/ui/label";
 import { useProducts } from "@/contexts/ProductsContext";
 import { useScannedProducts } from "@/contexts/ScannedProductsContext";
 import { QRScanner, QRScannerHandle } from "@/components/qr-scanner";
-import { ScanLine, X, Search, CheckCircle2 } from "lucide-react";
+import { ScanLine, X, Search, CheckCircle2, Keyboard, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-
+import {parseScanText} from "./parseScanText.js";
 const CUSTOMER_OPTIONS = ["ALL ALW", "ALL PNR", "ALL HUSUR", "TML", "VECV", "SWITCH MOBILITY", "IPLT"];
 const PRODUCT_TYPE_OPTIONS = ["COMPONENT", "DUMB", "FRONT", "I/A", "INTEGRATED", "MIDDLE", "NA", "REAR"];
 const TUBE_DIA_OPTIONS = ["0100X3.0", "100X4.5", "0101.577341", "0103.9X4.3", "ZEXP110", "0113.4X5.2", "0120X3", "120X4", "0120x6"];
 const C_FLANGE_ORIENTATION_OPTIONS = ["0", "90 degree", "N/A"];
 const COUPLING_FLANGE_OPTIONS = ["C/F 120 DIA 4 HOLES", "C/F 130 DIA & HOLES", "C/F 150 DIA 4 HOLES", "C/P 150 DIA ROUND 4 HOLES", "C/P 100 DIA 4 HOLES", "COUPLING YOKE", "NA", "21 SLEEVE YOKE"];
 const JOINT_TYPE_OPTIONS = ["135IT", "14K", "225/7", "325HS", "3251T", "325M", "403 JT", "490 L TML", "7061", "490/A TML", "7064", "7062 TML", "585/T", "4901T TML", "450M 7066 TML", "590H 7065 TML", "5901T TML"];
-const FLANGE_YOKE_OPTIONS = ["F/Y 120 DIA 4 HOLES", "F/Y 130 DIA BHOLES", "F/Y 150 DIA 4 LES", "F/Y 180 DIA 4 HOLES", "F/Y IA 150 DIA & HOLES", "F/YIA 180 DIA 4 HOLES", "PYO120 LF SIDE & FYO150 SF SIDE SERRAT", "FYD120 REP SIDE BL FYRISO SP-SP", "FHD120 HER SIDEFYDT50 SF-SF", "PYO150 LF SIDE & FVØ160 SF SIDE SERRATED", "FY180LF SIDE & FYD150 SF SIDE SERRATED"];
+const FLANGE_YOKE_OPTIONS = ["F/Y 120 DIA 4 HOLES", "F/Y 130 DIA BHOLES", "F/Y 150 DIA LES", "F/Y 180 DIA 4 HOLES", "F/Y IA 150 DIA & HOLES", "F/YIA 180 DIA 4 HOLES", "PYO120 LF SIDE & FYO150 SF SIDE SERRAT", "FYD120 REP SIDE BL FYRISO SP-SP", "FHD120 HER SIDEFYDT50 SF-SF", "PYO150 LF SIDE & FVØ160 SF SIDE SERRATED", "FY180LF SIDE & FYD150 SF SIDE SERRATED"];
 
 export default function ProductionVerificationPage() {
     const { products, loading: productsLoading, dropdownOptions } = useProducts();
@@ -34,10 +34,18 @@ export default function ProductionVerificationPage() {
 
     // ── Scanner ────────────────────────────────────────────────────────────────
     const [isScannerOpen, setIsScannerOpen] = useState(false);
-    const [scannerKey, setScannerKey] = useState(0);       // bump → fresh mount
+    const [scannerKey, setScannerKey] = useState(0);
     const scannerRef = useRef<QRScannerHandle>(null);
-    const isClosingRef = useRef(false);                    // prevent double-close
+    const isClosingRef = useRef(false);
+// 1. Add state for scan mode (near your other state declarations)
+const [scanMode, setScanMode] = useState<"camera" | "external">("camera");
 
+// 2. Add a helper to open scanner in a specific mode
+const handleOpenScannerMode = useCallback((mode: "camera" | "external") => {
+    setScanMode(mode);
+    setScannerKey(prev => prev + 1);
+    setIsScannerOpen(true);
+}, []);
     // ── Form ───────────────────────────────────────────────────────────────────
     const [plant, setPlant] = useState("Lucknow-RSB LKW");
     const [partSlNo, setPartSlNo] = useState("");
@@ -52,6 +60,12 @@ export default function ProductionVerificationPage() {
     const [formCouplingFlange, setFormCouplingFlange] = useState("");
     const [extractedPartNo, setExtractedPartNo] = useState("");
 
+    // ── Verification state ─────────────────────────────────────────────────────
+    // Fields that mismatched on the last scan (shown in the details box)
+    const [mismatchedFields, setMismatchedFields] = useState<Set<string>>(new Set());
+    // The DB spec values fetched for the last scanned part (for display in the details box)
+    const [scannedSpec, setScannedSpec] = useState<Record<string, string>>({});
+
     const dedupe = (arr: string[] | undefined) => arr?.length ? Array.from(new Set(arr)) : undefined;
 
     const activeCustomerOptions = dedupe(dropdownOptions?.CUSTOMER_OPTIONS) ?? CUSTOMER_OPTIONS;
@@ -64,13 +78,11 @@ export default function ProductionVerificationPage() {
 
     const isFlangeDisabled = formProductType !== "FRONT" && formProductType !== "MIDDLE";
 
-    // Open: bump key so QRScanner always gets a completely fresh mount
     const handleOpenScanner = useCallback(() => {
         setScannerKey(prev => prev + 1);
         setIsScannerOpen(true);
     }, []);
 
-    // Close: kill camera FIRST, then hide dialog — single source of truth
     const handleCloseScanner = useCallback(async () => {
         if (isClosingRef.current) return;
         isClosingRef.current = true;
@@ -82,71 +94,139 @@ export default function ProductionVerificationPage() {
         }
     }, []);
 
-    // Called by QRScanner after it has already stopped its own stream
-    const handleScan = useCallback((decodedText: string) => {
+    // ── Core scan handler: verify immediately, never overwrite form ────────────
+    const handleScan = useCallback(async (decodedText: string) => {
         setScannedLabel(decodedText);
+        setMismatchedFields(new Set());
+        setScannedSpec({});
+
+        // Extract part number
+       // ── Parse barcode — supports F1, F2, F3 ─────────────────────────────
+        const parsed = parseScanText(decodedText);
 
         let partNo = "";
-        const revIndex = decodedText.toLowerCase().indexOf("rev");
-        partNo = revIndex > -1
-            ? decodedText.substring(0, revIndex).trim()
-            : decodedText.split(" ")[0].trim();
+        let extractedSlNo = "";
 
-        setExtractedPartNo(partNo);
-        // Extract the last 6 digits for the Part SL No
-        const extractedSlNo = decodedText.length >= 6 ? decodedText.slice(-6) : decodedText;
-        setPartSlNo(extractedSlNo);
-
-        const matchedProduct = products.find(p => p.part_number === partNo);
-        if (matchedProduct) {
-            const spec = matchedProduct.specification || {};
-            setFormCustomer(matchedProduct.customer || "");
-            setFormProductType(spec.partType || "");
-            setFormTubeDia(spec.tubeDiameter || "");
-            setFormTubeLength(spec.tubeLength || "");
-            setFormJointType(spec.series || "");
-            setFormCFlangeOrientation(spec.couplingFlangeOrientations || "");
-            setFormFlangeYoke(spec.mountingDetailsFlangeYoke || "");
-            setFormCouplingFlange(spec.mountingDetailsCouplingFlange || "");
-            toast.success("Product details loaded from QR");
+        if (parsed) {
+            partNo        = parsed.partNo;
+            extractedSlNo = parsed.partSlNo;
         } else {
+    // Fallback for unknown formats
+    const revIndex = decodedText.toLowerCase().indexOf("rev");
+    partNo = revIndex > -1
+        ? decodedText.substring(0, revIndex).trim()
+        : decodedText.split(" ")[0].trim();
+    extractedSlNo = decodedText.length >= 6 ? decodedText.slice(-6) : decodedText;
+}
+        console.log("🔍 Raw Scanned Text:", decodedText);
+        console.log("📦 Extracted Part Number:", partNo);
+        console.log("🔢 Extracted Serial Number:", extractedSlNo);
+        setExtractedPartNo(partNo);
+        setPartSlNo(extractedSlNo);
+        // Look up DB record
+        const matchedProduct = products.find(p => p.part_number === partNo);
+
+        if (!matchedProduct) {
             toast.warning(`Part Number ${partNo} not found in database.`);
-            setFormCustomer(""); setFormProductType(""); setFormTubeDia("");
-            setFormTubeLength(""); setFormJointType(""); setFormCFlangeOrientation("");
-            setFormFlangeYoke(""); setFormCouplingFlange("");
+            return;
         }
-    }, [products]);
 
-    const handleCheck = async () => {
-        if (!extractedPartNo) { toast.error("Please scan or enter a part number first"); return; }
-        const matched = products.find(p => p.part_number === extractedPartNo);
+        // Pull expected values from DB
+        const spec = matchedProduct.specification || {};
+        const dbCustomer       = matchedProduct.customer || "";
+        const dbProductType    = spec.partType || "";
+        const dbTubeDia        = spec.tubeDiameter || "";
+        const dbTubeLength     = String(spec.tubeLength || "");
+        const dbJointType      = spec.series || "";
+        const dbCFlangeOrient  = spec.couplingFlangeOrientations || "";
+        const dbFlangeYoke     = spec.mountingDetailsFlangeYoke || "";
+        const dbCouplingFlange = spec.mountingDetailsCouplingFlange || "";
 
+        // Store DB values for the Scanned Label Details box
+        setScannedSpec({
+            customer:       dbCustomer,
+            productType:    dbProductType,
+            tubeDia:        dbTubeDia,
+            tubeLength:     dbTubeLength,
+            jointType:      dbJointType,
+            cFlangeOrient:  dbCFlangeOrient,
+            flangeYoke:     dbFlangeYoke,
+            couplingFlange: dbCouplingFlange,
+        });
+
+        // Compare user-filled form values vs DB expected values
+        const mismatches = new Set<string>();
+        const compare = (formVal: string, dbVal: string, key: string) => {
+            // Only flag if DB has a value and they differ (case-insensitive trim)
+            if (dbVal && formVal.trim().toLowerCase() !== dbVal.trim().toLowerCase()) {
+                mismatches.add(key);
+            }
+        };
+
+        compare(formCustomer,           dbCustomer,       "customer");
+        compare(formProductType,        dbProductType,    "productType");
+        compare(formTubeDia,            dbTubeDia,        "tubeDia");
+        compare(formTubeLength,         dbTubeLength,     "tubeLength");
+        compare(formJointType,          dbJointType,      "jointType");
+        compare(formFlangeYoke,         dbFlangeYoke,     "flangeYoke");
+        // Only verify flange-related fields for FRONT and MIDDLE product types
+        if (formProductType === "FRONT" || formProductType === "MIDDLE") {
+            compare(formCFlangeOrientation, dbCFlangeOrient,  "cFlangeOrient");
+            compare(formCouplingFlange,     dbCouplingFlange, "couplingFlange");
+        }
+
+        setMismatchedFields(mismatches);
+
+        const hasMismatch = mismatches.size > 0;
+
+        // Determine shift
         let currentShift = "A";
         const hour = new Date().getHours();
         if (hour >= 6 && hour < 14) currentShift = "A";
         else if (hour >= 14 && hour < 22) currentShift = "B";
         else currentShift = "C";
 
+        // Auto-record scan with user's form values as the "claimed" spec
         await recordScan({
-            part_no: extractedPartNo,
+            part_no: partNo,
             dispatch_date: new Date().toISOString().split("T")[0],
             shift: currentShift,
             customer_name: formCustomer || "Unknown",
             product_type: formProductType || "Unknown",
-            scanned_text: scannedLabel || extractedPartNo,
-            part_sl_no: partSlNo,
+            scanned_text: decodedText,
+            part_sl_no: extractedSlNo,
             plant_location: plant,
-            vendorCode: matched?.specification?.vendorCode || "N/A",
+            vendorCode: matchedProduct.specification?.vendorCode || "N/A",
             scanned_specification: {
-                tubeDiameter: formTubeDia,
-                tubeLength: Number(formTubeLength) || 0,
-                series: formJointType,
-                cFlangeOrient: formCFlangeOrientation,
-                flangeYoke: formFlangeYoke,
+                tubeDiameter:   formTubeDia,
+                tubeLength:     Number(formTubeLength) || 0,
+                series:         formJointType,
+                cFlangeOrient:  formCFlangeOrientation,
+                flangeYoke:     formFlangeYoke,
                 couplingFlange: formCouplingFlange,
             },
         });
-    };
+
+        if (hasMismatch) {
+            toast.error(`Verification failed — ${mismatches.size} field(s) mismatch. Check highlighted values below.`);
+        } else {
+            toast.success("Verification passed — all fields match!");
+        }
+
+        // NOTE: Form fields are intentionally NOT reset here.
+        // The user can change only the fields that differ before the next scan.
+    }, [
+        products,
+        formCustomer, formProductType, formTubeDia, formTubeLength,
+        formJointType, formCFlangeOrientation, formFlangeYoke, formCouplingFlange,
+        plant, recordScan,
+    ]);
+
+    // Helper: class for a detail-box row — red bg + bold if mismatched
+    const detailCls = (key: string) =>
+        mismatchedFields.has(key)
+            ? "font-semibold text-red-600 bg-red-50 px-1 rounded"
+            : "font-medium";
 
     if (productsLoading || scanLoading) {
         return <DashboardLayout><div className="p-8 text-center text-muted-foreground">Loading...</div></DashboardLayout>;
@@ -162,38 +242,62 @@ export default function ProductionVerificationPage() {
 
                 <div className="bg-card border border-t-0 rounded-b-md shadow-sm p-4 text-sm -mt-6">
                     {/* Top row */}
-                    <div className="grid grid-cols-1 md:grid-cols-[1fr_200px_minmax(300px,1fr)] gap-4 mb-6">
-                        <div className="flex items-center gap-2">
-                            <Label className="w-24 shrink-0">Plant</Label>
-                            <Input value={plant} onChange={e => setPlant(e.target.value)} className="h-9" />
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Label className="w-24 shrink-0">Part Sl NO.</Label>
-                            <Input value={partSlNo} readOnly className="h-9 bg-muted/50" />
-                        </div>
-                        <div className="flex items-center gap-2 relative">
-                            <Label className="w-24 shrink-0">Scanned Label</Label>
-                            <div className="flex w-full gap-2">
-                                <Input value={scannedLabel} onChange={e => setScannedLabel(e.target.value)} className="h-9 flex-1 bg-blue-50/50" placeholder="Scan to populate" />
-                                {scannedLabel && (
-                                    <Button variant="ghost" size="icon" className="h-9 w-9 absolute right-10" onClick={() => setScannedLabel("")}>
-                                        <X className="w-4 h-4" />
-                                    </Button>
-                                )}
-                                <Button size="sm" onClick={handleOpenScanner} className="h-9 bg-primary">
-                                    <ScanLine className="w-4 h-4 mr-2" /> Scan
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
+{/* TOP ROW — remove the inline Scan button from scanned label */}
+<div className="grid grid-cols-1 md:grid-cols-[1fr_200px_minmax(300px,1fr)] gap-4 mb-4">
+    <div className="flex items-center gap-2">
+        <Label className="w-24 shrink-0">Plant</Label>
+        <Input value={plant} onChange={e => setPlant(e.target.value)} className="h-9" />
+    </div>
+    <div className="flex items-center gap-2">
+        <Label className="w-24 shrink-0">Part Sl NO.</Label>
+        <Input value={partSlNo} readOnly className="h-9 bg-muted/50" />
+    </div>
+    <div className="flex items-center justify-end flex-col gap-2">
+        <div className="flex  w-full">
+
+        <Label className="w-24 shrink-0">Scanned Label</Label>
+        {/* ✅ Read-only — no X button, no inline Scan button */}
+        <Input
+            value={scannedLabel}
+            readOnly
+            className="h-9 flex-1 bg-muted/50 cursor-default"
+            placeholder="Scan to populate"
+        />
+        </div>
+        <div className="flex items-center gap-3 mb-6">
+    <span className="text-xs text-muted-foreground font-medium">Scan via:</span>
+    <Button
+        size="sm"
+        variant="outline"
+        className="h-8 gap-2 text-xs"
+        onClick={() => handleOpenScannerMode("camera")}
+    >
+        <Camera className="w-3.5 h-3.5" />
+        Camera
+    </Button>
+    <Button
+        size="sm"
+        variant="outline"
+        className="h-8 gap-2 text-xs"
+        onClick={() => handleOpenScannerMode("external")}
+    >
+        <Keyboard className="w-3.5 h-3.5" />
+        External Device
+    </Button>
+</div>
+    </div>
+</div>
+
+{/* ✅ NEW: Two separate scan buttons below the top row */}
+
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        {/* Left selects */}
+                        {/* Left: form — user fills before scanning */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                             {[
-                                { label: "Customer Name", value: formCustomer, onChange: setFormCustomer, options: activeCustomerOptions, placeholder: "Select Customer", span: true },
-                                { label: "Product Type", value: formProductType, onChange: setFormProductType, options: activeProductTypeOptions, placeholder: "Select Product Type", span: true },
-                                { label: "Tube Dia & Thickness", value: formTubeDia, onChange: setFormTubeDia, options: activeTubeDiaOptions, placeholder: "Select Tube Dia", span: true },
+                                { label: "Customer Name",       value: formCustomer,       onChange: setFormCustomer,       options: activeCustomerOptions,       placeholder: "Select Customer",    span: true },
+                                { label: "Product Type",        value: formProductType,    onChange: setFormProductType,    options: activeProductTypeOptions,    placeholder: "Select Product Type", span: true },
+                                { label: "Tube Dia & Thickness",value: formTubeDia,        onChange: setFormTubeDia,        options: activeTubeDiaOptions,        placeholder: "Select Tube Dia",    span: true },
                             ].map(({ label, value, onChange, options, placeholder, span }) => (
                                 <div key={label} className={`flex items-center justify-between ${span ? "col-span-2" : ""}`}>
                                     <Label className="w-1/3 text-muted-foreground">{label}</Label>
@@ -236,33 +340,51 @@ export default function ProductionVerificationPage() {
                                     <SelectContent>{activeCouplingFlangeOptions.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
                                 </Select>
                             </div>
-                            <div className="col-span-2 mt-2 flex justify-end">
-                                <Button onClick={handleCheck} className="min-w-[120px]">
-                                    Check <CheckCircle2 className="w-4 h-4 ml-2" />
-                                </Button>
+
+                            {/* Helper text replacing the old Check button */}
+                            <div className="col-span-2 mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+                                Fill the fields above, then scan the QR code — verification runs automatically.
                             </div>
                         </div>
 
-                        {/* Right: details */}
+                        {/* Right: Scanned Label Details — shows DB values, highlights mismatches */}
                         <div>
-                            <p className="text-xs text-muted-foreground mb-2 font-medium">Scanned Label Details</p>
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-xs text-muted-foreground font-medium">Scanned Label Details</p>
+                                {mismatchedFields.size > 0 && (
+                                    <span className="text-[10px] font-semibold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
+                                        {mismatchedFields.size} mismatch{mismatchedFields.size > 1 ? "es" : ""}
+                                    </span>
+                                )}
+                                {mismatchedFields.size === 0 && extractedPartNo && (
+                                    <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full">
+                                        All matched ✓
+                                    </span>
+                                )}
+                            </div>
                             <div className="border border-border/60 rounded-md p-4 bg-muted/20 min-h-[220px]">
                                 <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-xs">
                                     {[
-                                        ["Part No.", extractedPartNo, "font-semibold text-primary"],
-                                        ["Customer:", formCustomer],
-                                        ["JT:", formJointType],
-                                        ["Stickers Count:", "1"],
-                                        ["Length:", formTubeLength],
-                                        ["Type:", formProductType],
-                                        ["C_Flange:", formCFlangeOrientation],
-                                        ["Flange Yoke:", formFlangeYoke],
-                                        ["CB Kit:", "-"],
-                                        ["Coupling Flge:", formCouplingFlange],
-                                    ].map(([label, val, cls]) => (
-                                        <div key={label as string}>
+                                        { label: "Part No.",      val: extractedPartNo,            cls: "font-semibold text-primary", key: "" },
+                                        { label: "Customer:",     val: scannedSpec.customer,       key: "customer" },
+                                        { label: "JT:",           val: scannedSpec.jointType,      key: "jointType" },
+                                        { label: "Stickers Count:", val: "1",                      key: "" },
+                                        { label: "Length:",       val: scannedSpec.tubeLength,     key: "tubeLength" },
+                                        { label: "Type:",         val: scannedSpec.productType,    key: "productType" },
+                                        { label: "C_Flange:",     val: scannedSpec.cFlangeOrient,  key: "cFlangeOrient" },
+                                        { label: "Flange Yoke:",  val: scannedSpec.flangeYoke,     key: "flangeYoke" },
+                                        { label: "CB Kit:",       val: "-",                        key: "" },
+                                        { label: "Coupling Flge:", val: scannedSpec.couplingFlange, key: "couplingFlange" },
+                                    ].map(({ label, val, cls, key }) => (
+                                        <div key={label}>
                                             <span className="text-muted-foreground inline-block w-24">{label}</span>
-                                            <span className={`font-medium ${cls || ""}`}>{val}</span>
+                                            <span className={cls || (key ? detailCls(key) : "font-medium")}>
+                                                {val || "—"}
+                                                {key && mismatchedFields.has(key) && (
+                                                    <span className="ml-1 text-[9px] uppercase tracking-wide text-red-500">✗ mismatch</span>
+                                                )}
+                                            </span>
                                         </div>
                                     ))}
                                 </div>
@@ -271,7 +393,7 @@ export default function ProductionVerificationPage() {
                     </div>
                 </div>
 
-                {/* History */}
+                {/* History table */}
                 <div className="bg-primary text-primary-foreground py-2 px-4 rounded-t-md font-semibold mt-8">
                     Label Validation Details
                 </div>
@@ -296,9 +418,9 @@ export default function ProductionVerificationPage() {
                             </thead>
                             <tbody>
                                 {scannedProducts.length === 0 ? (
-                                    <tr><td colSpan={11} className="py-8 text-center text-muted-foreground">No validation history found. Scan a product to add records.</td></tr>
+                                    <tr><td colSpan={14} className="py-8 text-center text-muted-foreground">No validation history found. Scan a product to add records.</td></tr>
                                 ) : (
-                                    scannedProducts.map((record, idx) => (
+                                    scannedProducts.map((record) => (
                                         <tr key={record.id} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
                                             <td className="px-4 py-2">{new Date(record.dispatch_date).toLocaleDateString()}</td>
                                             <td className="px-4 py-2">{record.shift}</td>
@@ -312,7 +434,7 @@ export default function ProductionVerificationPage() {
                                             </td>
                                             <td className="px-4 py-2 text-muted-foreground">{record.remarks}</td>
                                             <td className="px-4 py-2 font-mono">{record.part_sl_no || "N/A"}</td>
-                                            <td className="px-4 py-2 font-mono  truncate max-w-[260px]" title={record.scanned_text}>{record.scanned_text}</td>
+                                            <td className="px-4 py-2 font-mono truncate max-w-[260px]" title={record.scanned_text}>{record.scanned_text}</td>
                                             <td className="px-4 py-2">{record.plant_location}</td>
                                             <td className="px-4 py-2">{record.vendorCode || "N/A"}</td>
                                             <td className="px-4 py-2">{record.is_rejected ? "Yes" : "No"}</td>
@@ -355,8 +477,6 @@ export default function ProductionVerificationPage() {
             <Dialog
                 open={isScannerOpen}
                 onOpenChange={async (open) => {
-                    // ALL close paths (Escape / backdrop / X) come here.
-                    // Always kill camera before unmounting.
                     if (!open) await handleCloseScanner();
                 }}
             >
@@ -367,19 +487,15 @@ export default function ProductionVerificationPage() {
 
                     {isScannerOpen && (
                         <div className="py-4">
-                            {/*
-                             * key=scannerKey → brand-new DOM node + camera stream every open.
-                             * ref=scannerRef → parent can call forceStop() imperatively.
-                             * onStopped=handleCloseScanner → scanner closes dialog after scan.
-                             */}
                             <QRScanner
                                 key={scannerKey}
                                 ref={scannerRef}
                                 onScan={handleScan}
                                 onStopped={handleCloseScanner}
+                                initialMode={scanMode} 
                             />
                             <p className="text-xs text-center text-muted-foreground mt-4">
-                                Point camera at the product label QR code. The system will automatically capture it.
+                                Point camera at the product label QR code. The system will automatically capture and verify it.
                             </p>
                         </div>
                     )}

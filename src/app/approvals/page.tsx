@@ -4,16 +4,22 @@ import { useState, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useProducts } from "@/contexts/ProductsContext";
+import { useDynamicFields } from "@/contexts/DynamicFieldsContext";
 import { Product } from "@/types/api";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
     CheckCircle2,
     XCircle,
     Clock,
     Package,
+    FileImage,
+    Search,
 } from "lucide-react";
 
 const statusConfig: Record<string, { label: string; color: string; icon: React.ElementType; badge: string }> = {
@@ -22,37 +28,106 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.E
     rejected: { label: "Rejected", color: "text-red-600", icon: XCircle, badge: "bg-red-50 text-red-700 border-red-200" },
 };
 
-// Define fields outside component to avoid recreation
-const FIELDS = [
-    { key: "customer", label: "Customer Name" },
-    { key: "vendorCode", label: "Vendor Code" },
-    { key: "poNumber", label: "PO Number" },
-    { key: "supplyDate", label: "Supply Date" },
-    { key: "sampleStatus", label: "Sample Status" },
-    { key: "sampleSupplyMode", label: "Sample Supply Mode" },
-    { key: "acceptedMailDate", label: "Accepted Mail Date" },
-    { key: "trsoDate", label: "TRSO Date" },
-    { key: "trsoModel", label: "TRSO Model" },
-    { key: "trsoRev", label: "TRSO Rev" },
-    { key: "iqaDate", label: "IQA Date" },
-    { key: "iqaModel", label: "IQA Model" },
-    { key: "iqaVcNumber", label: "IQA VC Number" },
-    { key: "ppapIntimateDate", label: "PPAP Intimate Date" },
-    { key: "ppapClosingDate", label: "PPAP Closing Date" },
-    { key: "ppapStatus", label: "PPAP Status" },
-    { key: "revNo", label: "Rev No" },
-    { key: "drawingNumber", label: "Drawing Number" },
-    { key: "drawingModel", label: "Drawing Model" },
-    { key: "vehicleType", label: "Vehicle Type" },
-    { key: "partNumber", label: "Part No." },
-    { key: "partDescription", label: "Part Description" },
-    { key: "partWeightKg", label: "Part Weight in kg" },
-];
+// Map for known labels
+const FIELD_LABELS: Record<string, string> = {
+    customer: "Customer Name",
+    vendorCode: "Vendor Code",
+    poNumber: "PO Number",
+    supplyDate: "Supply Date",
+    sampleStatus: "Sample Status",
+    sampleSupplyMode: "Sample Supply Mode",
+    acceptedMailDate: "Accepted Mail Date",
+    trsoDate: "TRSO Date",
+    trsoModel: "TRSO Model",
+    trsoRev: "TRSO Rev",
+    iqaDate: "IQA Date",
+    iqaModel: "IQA Model",
+    iqaVcNumber: "IQA VC Number",
+    ppapIntimateDate: "PPAP Intimate Date",
+    ppapClosingDate: "PPAP Closing Date",
+    ppapStatus: "PPAP Status",
+    revNo: "Rev No",
+    drawingNumber: "Drawing Number",
+    drawingModel: "Drawing Model",
+    vehicleType: "Vehicle Type",
+    partNumber: "Part No.",
+    partDescription: "Part Description",
+    partWeightKg: "Part Weight in kg"
+};
 
-export default function ApprovalsPage() {
+const formatLabel = (key: string) => {
+    if (FIELD_LABELS[key]) return FIELD_LABELS[key];
+    const split = key.replace(/([A-Z])/g, ' $1').trim();
+    return split.charAt(0).toUpperCase() + split.slice(1);
+};
+
+// Helper to get the drawing URL from ppap_documents
+const getDrawingUrl = (product: Product): string | null => {
+    const raw = product.ppap_documents;
+    if (!raw) return null;
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!parsed || typeof parsed !== 'object') return null;
+        
+        // Check for "drawing" or "Drawing" in both individual and ppap categories
+        const path = parsed?.individual?.drawing || 
+                     parsed?.individual?.Drawing || 
+                     parsed?.ppap?.drawing || 
+                     parsed?.ppap?.Drawing;
+                     
+        if (!path || path === "not_required") return null;
+        if (path.startsWith('http')) return path;
+        const normalizedPath = path.replace(/\\/g, '/');
+        return `${process.env.NEXT_PUBLIC_URL}/${normalizedPath}`;
+    } catch {
+        return null;
+    }
+};
+
+export default function ProductionApprovalPage() {
     const { products, updateApproval, loading } = useProducts();
+    const { data: dynamicData, loading: dynamicLoading } = useDynamicFields();
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
     const [reviewedFields, setReviewedFields] = useState<Set<string>>(new Set());
+    const [remark, setRemark] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
+
+const allFields = [
+  { key: "partNumber", label: formatLabel("partNumber") },
+  { key: "customer", label: formatLabel("customer") },
+  { key: "vendorCode", label: formatLabel("vendorCode") },
+  { key: "partType", label: formatLabel("partType") },
+  { key: "partDescription", label: formatLabel("partDescription") },
+  { key: "series", label: formatLabel("series") },
+  { key: "revNo", label: formatLabel("revNo") },
+  { key: "tubeLength", label: formatLabel("tubeLength") },
+  { key: "tubeDiameter", label: formatLabel("tubeDiameter") },
+  { key: "partWeightKg", label: formatLabel("partWeightKg") },
+  { key: "totalLength", label: formatLabel("totalLength") },
+  { key: "noiseDeadenerLength", label: formatLabel("noiseDeadenerLength") },
+  { key: "availableNoiseDeadener", label: formatLabel("availableNoiseDeadener") },
+  { key: "rearHousingLength", label: formatLabel("rearHousingLength") },
+  { key: "longForkLength", label: formatLabel("longForkLength") },
+  { key: "pdcLength", label: formatLabel("pdcLength") },
+  { key: "drawingNumber", label: formatLabel("drawingNumber") },
+  { key: "drawingModel", label: formatLabel("drawingModel") },
+  { key: "fepPressHStockPositions", label: formatLabel("fepPressHStockPositions") },
+  { key: "frontEndPieceDetails", label: formatLabel("frontEndPieceDetails") },
+  { key: "sfDetails", label: formatLabel("sfDetails") },
+  { key: "couplingFlangeOrientations", label: formatLabel("couplingFlangeOrientations") },
+  { key: "hexBoltNutTighteningTorque", label: formatLabel("hexBoltNutTighteningTorque") },
+  { key: "loctiteGradeUse", label: formatLabel("loctiteGradeUse") },
+  { key: "cbKitDetails", label: formatLabel("cbKitDetails") },
+  { key: "slipDetails", label: formatLabel("slipDetails") },
+  { key: "greaseableOrNonGreaseable", label: formatLabel("greaseableOrNonGreaseable") },
+  { key: "mountingDetailsFlangeYoke", label: formatLabel("mountingDetailsFlangeYoke") },
+  { key: "mountingDetailsCouplingFlange", label: formatLabel("mountingDetailsCouplingFlange") },
+  { key: "iaBellowDetails", label: formatLabel("iaBellowDetails") },
+  { key: "balancingRpm", label: formatLabel("balancingRpm") },
+  { key: "unbalanceInCmg", label: formatLabel("unbalanceInCmg") },
+  { key: "unbalanceInGram", label: formatLabel("unbalanceInGram") },
+  { key: "unbalanceInGram75Percent", label: formatLabel("unbalanceInGram75Percent") }
+];
 
     const getStatus = useCallback((status?: string) => {
         const s = status?.toLowerCase() || "pending";
@@ -60,12 +135,13 @@ export default function ApprovalsPage() {
     }, []);
 
     const handleAction = useCallback((product: Product, newStatus: string) => {
-        updateApproval(product.id, newStatus.toLowerCase() as any);
+        updateApproval(product.id, newStatus.toLowerCase() as any, remark);
         if (selectedProduct?.id === product.id) {
             setSelectedProduct(null);
             setReviewedFields(new Set());
+            setRemark("");
         }
-    }, [updateApproval, selectedProduct]);
+    }, [updateApproval, selectedProduct, remark]);
 
     const handleFieldClick = useCallback((key: string) => {
         setReviewedFields(prev => {
@@ -82,22 +158,28 @@ export default function ApprovalsPage() {
     const handleCloseDialog = useCallback(() => {
         setSelectedProduct(null);
         setReviewedFields(new Set());
+        setRemark("");
     }, []);
+
+    // Filter products that have drawings
+    const productsWithDrawing = useMemo(() => {
+        return products.filter(p => !!getDrawingUrl(p));
+    }, [products]);
 
     // Memoize stats to avoid recalculation on every render
     const stats = useMemo(() => {
-        const pending = products.filter(p => getStatus(p.approved) === "pending").length;
-        const approved = products.filter(p => getStatus(p.approved) === "approved").length;
-        const rejected = products.filter(p => getStatus(p.approved) === "rejected").length;
+        const pending = productsWithDrawing.filter(p => getStatus(p.approved) === "pending").length;
+        const approved = productsWithDrawing.filter(p => getStatus(p.approved) === "approved").length;
+        const rejected = productsWithDrawing.filter(p => getStatus(p.approved) === "rejected").length;
         
         return [
             { label: "Pending", count: pending, color: "text-orange-600", bg: "bg-orange-50" },
             { label: "Approved", count: approved, color: "text-emerald-600", bg: "bg-emerald-50" },
             { label: "Rejected", count: rejected, color: "text-red-600", bg: "bg-red-50" },
         ];
-    }, [products, getStatus]);
+    }, [productsWithDrawing, getStatus]);
 
-    if (loading) {
+    if (loading || dynamicLoading) {
         return (
             <DashboardLayout>
                 <div className="p-8 text-center text-muted-foreground">Loading...</div>
@@ -109,7 +191,7 @@ export default function ApprovalsPage() {
         <DashboardLayout>
             <div className="space-y-6">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight">Approval Workflow</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Production Approval</h1>
                     <p className="text-sm text-muted-foreground mt-1">Review and manage product approval queue</p>
                 </div>
 
@@ -121,10 +203,21 @@ export default function ApprovalsPage() {
                                 <div className={`w-10 h-10 rounded-xl ${stat.bg} flex items-center justify-center`}>
                                     <span className={`text-lg font-bold ${stat.color}`}>{stat.count}</span>
                                 </div>
-                                <span className="text-sm font-medium text-muted-foreground">{stat.label}</span>
+                                <span className="text-[18px] font-medium text-muted-foreground">{stat.label}</span>
                             </CardContent>
                         </Card>
                     ))}
+                </div>
+
+                {/* Search */}
+                <div className="relative max-w-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                        placeholder="Search by part number or customer..."
+                        className="pl-9 h-9 bg-muted/30 border-transparent focus:border-primary/30 text-sm"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
                 </div>
 
                 {/* Tabs */}
@@ -136,7 +229,13 @@ export default function ApprovalsPage() {
                     </TabsList>
 
                     {(["pending", "approved", "rejected"] as const).map((status) => {
-                        const filtered = products.filter(p => getStatus(p.approved) === status);
+                        const filtered = productsWithDrawing.filter(p => {
+                            if (getStatus(p.approved) !== status) return false;
+                            if (!searchQuery.trim()) return true;
+                            const q = searchQuery.toLowerCase();
+                            return (p.part_number || '').toLowerCase().includes(q) ||
+                                   (p.customer || '').toLowerCase().includes(q);
+                        });
                         const config = statusConfig[status];
                         
                         return (
@@ -151,6 +250,7 @@ export default function ApprovalsPage() {
                                                 onClick={() => {
                                                     setSelectedProduct(product);
                                                     setReviewedFields(new Set());
+                                                    setRemark("");
                                                 }}
                                             >
                                                 <CardContent className="p-5">
@@ -169,11 +269,7 @@ export default function ApprovalsPage() {
                                                             {config.label}
                                                         </Badge>
                                                     </div>
-                                                    <div className="grid grid-cols-2 gap-3 mb-4">
-                                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                                            <span>Added Recently</span>
-                                                        </div>
-                                                    </div>
+
                                                 </CardContent>
                                             </Card>
                                         );
@@ -196,15 +292,16 @@ export default function ApprovalsPage() {
             <Dialog open={!!selectedProduct} onOpenChange={(open) => !open && handleCloseDialog()}>
                 <DialogContent className="w-[95vw] !max-w-6xl h-[92vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle className="text-lg font-semibold">Product Details for Approval</DialogTitle>
+                        <DialogTitle className="text-lg font-semibold">Product Details for Production Approval</DialogTitle>
                         <p className="text-sm text-muted-foreground mt-1">
                             Click each field to mark it as reviewed. All fields must be reviewed before approving.
                         </p>
                     </DialogHeader>
 
                     {selectedProduct && (() => {
-                        const allReviewed = reviewedFields.size === FIELDS.length;
+                        const allReviewed = allFields.length === 0 || reviewedFields.size === allFields.length;
                         const reviewedCount = reviewedFields.size;
+                        const totalCount = allFields.length;
                         const currentStatus = getStatus(selectedProduct.approved);
 
                         return (
@@ -214,19 +311,52 @@ export default function ApprovalsPage() {
                                     <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                                         <div
                                             className="h-full bg-emerald-500 rounded-full transition-all duration-150"
-                                            style={{ width: `${(reviewedCount / FIELDS.length) * 100}%` }}
+                                            style={{ width: `${totalCount > 0 ? (reviewedCount / totalCount) * 100 : 100}%` }}
                                         />
                                     </div>
                                     <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                        {reviewedCount} / {FIELDS.length} reviewed
+                                        {reviewedCount} / {totalCount} reviewed
                                     </span>
                                 </div>
 
+                                {/* View Drawing Button */}
+                                {(() => {
+                                    const drawingUrl = getDrawingUrl(selectedProduct);
+                                    return drawingUrl ? (
+                                        <div className="flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg">
+                                            <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center flex-shrink-0">
+                                                <FileImage className="w-4.5 h-4.5 text-purple-600" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="text-sm font-medium text-purple-900 dark:text-purple-200">Product Drawing Available</p>
+                                                <p className="text-xs text-purple-600 dark:text-purple-400">Click to view the drawing document</p>
+                                            </div>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="border-purple-300 text-purple-700 hover:bg-purple-100 hover:text-purple-800 gap-1.5"
+                                                onClick={() => window.open(drawingUrl, '_blank')}
+                                            >
+                                                <FileImage className="w-3.5 h-3.5" />
+                                                View Drawing
+                                            </Button>
+                                        </div>
+                                    ) : null;
+                                })()}
+
                                 {/* Field grid */}
                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
-                                    {FIELDS.map(({ key, label }) => {
+                                    {allFields.map(({ key, label }) => {
                                         const isReviewed = reviewedFields.has(key);
-                                        const value = (selectedProduct as any)[key] || selectedProduct?.specification?.[key];
+                                        const topLevelMap: Record<string, string> = {
+                                            partNumber: 'part_number',
+                                            customer: 'customer',
+                                        };
+                                        const checkKey = topLevelMap[key] || key;
+                                        let value = (selectedProduct as any)[checkKey];
+                                        if (value === undefined) {
+                                            value = selectedProduct?.specification?.[key];
+                                        }
                                         
                                         return (
                                             <div
@@ -245,7 +375,7 @@ export default function ApprovalsPage() {
                                                     </span>
                                                 )}
                                                 <span className="text-muted-foreground block text-xs mb-1 pr-5">{label}</span>
-                                                <span className={`font-medium text-sm break-words ${isReviewed ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
+                                                <span className={`font-bold text-sm break-words ${isReviewed ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
                                                     {value || "-"}
                                                 </span>
                                             </div>
@@ -253,11 +383,26 @@ export default function ApprovalsPage() {
                                     })}
                                 </div>
 
+                                {/* Remark field */}
+                                <div className="space-y-2 pt-2">
+                                    <Label htmlFor="approval-remark" className="text-sm font-medium">
+                                        Remark 
+                                    </Label>
+                                    <Textarea
+                                        id="approval-remark"
+                                        placeholder="Add a remark for this approval or rejection..."
+                                        value={remark}
+                                        onChange={(e) => setRemark(e.target.value)}
+                                        className="min-h-[80px] resize-none"
+                                        required
+                                    />
+                                </div>
+
                                 {/* Footer */}
                                 <DialogFooter className="flex flex-col sm:flex-row items-center gap-2 mt-6 pt-4 border-t">
                                     {!allReviewed && (
                                         <p className="text-xs text-amber-600 mr-auto">
-                                            ⚠ Review all {FIELDS.length - reviewedCount} remaining field(s) to enable approval.
+                                            ⚠ Review all {totalCount - reviewedCount} remaining field(s) to enable approval.
                                         </p>
                                     )}
                                     <Button variant="outline" onClick={handleCloseDialog}>

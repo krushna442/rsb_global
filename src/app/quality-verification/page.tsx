@@ -4,17 +4,22 @@ import { useState, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useProducts } from "@/contexts/ProductsContext";
 import { useDynamicFields } from "@/contexts/DynamicFieldsContext";
 import { Product } from "@/types/api";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
     CheckCircle2,
     XCircle,
     Clock,
     Package,
+    FileImage,
+    Search,
 } from "lucide-react";
 
 const statusConfig: Record<string, { label: string; color: string; icon: React.ElementType; badge: string }> = {
@@ -23,7 +28,7 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.E
     rejected: { label: "Rejected", color: "text-red-600", icon: XCircle, badge: "bg-red-50 text-red-700 border-red-200" },
 };
 
-// Map for known labes
+// Map for known labels
 const FIELD_LABELS: Record<string, string> = {
     customer: "Customer Name",
     vendorCode: "Vendor Code",
@@ -56,16 +61,73 @@ const formatLabel = (key: string) => {
     return split.charAt(0).toUpperCase() + split.slice(1);
 };
 
-export default function ApprovalsPage() {
+// Helper to get the drawing URL from ppap_documents
+const getDrawingUrl = (product: Product): string | null => {
+    const raw = product.ppap_documents;
+    if (!raw) return null;
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!parsed || typeof parsed !== 'object') return null;
+        
+        // Check for "drawing" or "Drawing" in both individual and ppap categories
+        const path = parsed?.individual?.drawing || 
+                     parsed?.individual?.Drawing || 
+                     parsed?.ppap?.drawing || 
+                     parsed?.ppap?.Drawing;
+                     
+        if (!path || path === "not_required") return null;
+        if (path.startsWith('http')) return path;
+        const normalizedPath = path.replace(/\\/g, '/');
+        return `${process.env.NEXT_PUBLIC_URL}/${normalizedPath}`;
+    } catch {
+        return null;
+    }
+};
+
+export default function QualityVerificationPage() {
     const { products, updateQuality, loading } = useProducts();
     const { data: dynamicData, loading: dynamicLoading } = useDynamicFields();
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
     const [reviewedFields, setReviewedFields] = useState<Set<string>>(new Set());
+    const [remark, setRemark] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
 
-    const activeFields = useMemo(() => {
-        const fields = dynamicData?.quality_verification_fields || [];
-        return fields.map(key => ({ key, label: formatLabel(key) }));
-    }, [dynamicData]);
+const allFields = [
+  { key: "partNumber", label: formatLabel("partNumber") },
+  { key: "customer", label: formatLabel("customer") },
+  { key: "vendorCode", label: formatLabel("vendorCode") },
+  { key: "partType", label: formatLabel("partType") },
+  { key: "partDescription", label: formatLabel("partDescription") },
+  { key: "series", label: formatLabel("series") },
+  { key: "revNo", label: formatLabel("revNo") },
+  { key: "tubeLength", label: formatLabel("tubeLength") },
+  { key: "tubeDiameter", label: formatLabel("tubeDiameter") },
+  { key: "partWeightKg", label: formatLabel("partWeightKg") },
+  { key: "totalLength", label: formatLabel("totalLength") },
+  { key: "noiseDeadenerLength", label: formatLabel("noiseDeadenerLength") },
+  { key: "availableNoiseDeadener", label: formatLabel("availableNoiseDeadener") },
+  { key: "rearHousingLength", label: formatLabel("rearHousingLength") },
+  { key: "longForkLength", label: formatLabel("longForkLength") },
+  { key: "pdcLength", label: formatLabel("pdcLength") },
+  { key: "drawingNumber", label: formatLabel("drawingNumber") },
+  { key: "drawingModel", label: formatLabel("drawingModel") },
+  { key: "fepPressHStockPositions", label: formatLabel("fepPressHStockPositions") },
+  { key: "frontEndPieceDetails", label: formatLabel("frontEndPieceDetails") },
+  { key: "sfDetails", label: formatLabel("sfDetails") },
+  { key: "couplingFlangeOrientations", label: formatLabel("couplingFlangeOrientations") },
+  { key: "hexBoltNutTighteningTorque", label: formatLabel("hexBoltNutTighteningTorque") },
+  { key: "loctiteGradeUse", label: formatLabel("loctiteGradeUse") },
+  { key: "cbKitDetails", label: formatLabel("cbKitDetails") },
+  { key: "slipDetails", label: formatLabel("slipDetails") },
+  { key: "greaseableOrNonGreaseable", label: formatLabel("greaseableOrNonGreaseable") },
+  { key: "mountingDetailsFlangeYoke", label: formatLabel("mountingDetailsFlangeYoke") },
+  { key: "mountingDetailsCouplingFlange", label: formatLabel("mountingDetailsCouplingFlange") },
+  { key: "iaBellowDetails", label: formatLabel("iaBellowDetails") },
+  { key: "balancingRpm", label: formatLabel("balancingRpm") },
+  { key: "unbalanceInCmg", label: formatLabel("unbalanceInCmg") },
+  { key: "unbalanceInGram", label: formatLabel("unbalanceInGram") },
+  { key: "unbalanceInGram75Percent", label: formatLabel("unbalanceInGram75Percent") }
+];
 
     const getStatus = useCallback((status?: string) => {
         const s = status?.toLowerCase() || "pending";
@@ -73,12 +135,13 @@ export default function ApprovalsPage() {
     }, []);
 
     const handleAction = useCallback((product: Product, newStatus: string) => {
-        updateQuality(product.id, newStatus.toLowerCase() as any);
+        updateQuality(product.id, newStatus.toLowerCase() as any, remark);
         if (selectedProduct?.id === product.id) {
             setSelectedProduct(null);
             setReviewedFields(new Set());
+            setRemark("");
         }
-    }, [updateQuality, selectedProduct]);
+    }, [updateQuality, selectedProduct, remark]);
 
     const handleFieldClick = useCallback((key: string) => {
         setReviewedFields(prev => {
@@ -95,20 +158,26 @@ export default function ApprovalsPage() {
     const handleCloseDialog = useCallback(() => {
         setSelectedProduct(null);
         setReviewedFields(new Set());
+        setRemark("");
     }, []);
+
+    // Filter products that have drawings
+    const productsWithDrawing = useMemo(() => {
+        return products.filter(p => !!getDrawingUrl(p));
+    }, [products]);
 
     // Memoize stats to avoid recalculation on every render
     const stats = useMemo(() => {
-        const pending = products.filter(p => getStatus(p.quality_verified) === "pending").length;
-        const approved = products.filter(p => getStatus(p.quality_verified) === "approved").length;
-        const rejected = products.filter(p => getStatus(p.quality_verified) === "rejected").length;
+        const pending = productsWithDrawing.filter(p => getStatus(p.quality_verified) === "pending").length;
+        const approved = productsWithDrawing.filter(p => getStatus(p.quality_verified) === "approved").length;
+        const rejected = productsWithDrawing.filter(p => getStatus(p.quality_verified) === "rejected").length;
         
         return [
             { label: "Pending", count: pending, color: "text-orange-600", bg: "bg-orange-50" },
             { label: "Approved", count: approved, color: "text-emerald-600", bg: "bg-emerald-50" },
             { label: "Rejected", count: rejected, color: "text-red-600", bg: "bg-red-50" },
         ];
-    }, [products, getStatus]);
+    }, [productsWithDrawing, getStatus]);
 
     if (loading || dynamicLoading) {
         return (
@@ -123,7 +192,7 @@ export default function ApprovalsPage() {
             <div className="space-y-6">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">Quality Verification</h1>
-                    <p className="text-sm text-muted-foreground mt-1">Review and manage product approval queue</p>
+                    <p className="text-sm text-muted-foreground mt-1">Review and verify product quality</p>
                 </div>
 
                 {/* Stats */}
@@ -134,10 +203,21 @@ export default function ApprovalsPage() {
                                 <div className={`w-10 h-10 rounded-xl ${stat.bg} flex items-center justify-center`}>
                                     <span className={`text-lg font-bold ${stat.color}`}>{stat.count}</span>
                                 </div>
-                                <span className="text-sm font-medium text-muted-foreground">{stat.label}</span>
+                                <span className="text-[18px] font-medium text-muted-foreground">{stat.label}</span>
                             </CardContent>
                         </Card>
                     ))}
+                </div>
+
+                {/* Search */}
+                <div className="relative max-w-md bg-slate-200 rounded-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                        placeholder="Search by part number or customer..."
+                        className="pl-9 h-9 bg-muted/30 border-transparent focus:border-primary/30 text-sm"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
                 </div>
 
                 {/* Tabs */}
@@ -149,7 +229,13 @@ export default function ApprovalsPage() {
                     </TabsList>
 
                     {(["pending", "approved", "rejected"] as const).map((status) => {
-                        const filtered = products.filter(p => getStatus(p.quality_verified) === status);
+                        const filtered = productsWithDrawing.filter(p => {
+                            if (getStatus(p.quality_verified) !== status) return false;
+                            if (!searchQuery.trim()) return true;
+                            const q = searchQuery.toLowerCase();
+                            return (p.part_number || '').toLowerCase().includes(q) ||
+                                   (p.customer || '').toLowerCase().includes(q);
+                        });
                         const config = statusConfig[status];
                         
                         return (
@@ -164,6 +250,7 @@ export default function ApprovalsPage() {
                                                 onClick={() => {
                                                     setSelectedProduct(product);
                                                     setReviewedFields(new Set());
+                                                    setRemark("");
                                                 }}
                                             >
                                                 <CardContent className="p-5">
@@ -182,11 +269,7 @@ export default function ApprovalsPage() {
                                                             {config.label}
                                                         </Badge>
                                                     </div>
-                                                    <div className="grid grid-cols-2 gap-3 mb-4">
-                                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                                            <span>Added Recently</span>
-                                                        </div>
-                                                    </div>
+
                                                 </CardContent>
                                             </Card>
                                         );
@@ -205,29 +288,20 @@ export default function ApprovalsPage() {
                 </Tabs>
             </div>
 
-            {/* Approval Details Popup */}
+            {/* Quality Verification Details Popup */}
             <Dialog open={!!selectedProduct} onOpenChange={(open) => !open && handleCloseDialog()}>
                 <DialogContent className="w-[95vw] !max-w-6xl h-[92vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle className="text-lg font-semibold">Product Details for Approval</DialogTitle>
+                        <DialogTitle className="text-lg font-semibold">Product Details for Quality Verification</DialogTitle>
                         <p className="text-sm text-muted-foreground mt-1">
                             Click each field to mark it as reviewed. All fields must be reviewed before approving.
                         </p>
                     </DialogHeader>
 
                     {selectedProduct && (() => {
-                        const editedFields = Array.isArray(selectedProduct.edited_fields) ? selectedProduct.edited_fields : [];
-                        const rawRequiredFields = editedFields.length > 0 
-                            ? activeFields.filter(f => editedFields.includes(f.key)) 
-                            : activeFields;
-                        
-                        // If there are edited fields but none of them are in activeFields, fallback to activeFields
-                        const requiredFields = rawRequiredFields.length > 0 ? rawRequiredFields : activeFields;
-                        
-                        const requiredCount = requiredFields.length;
-                        const reviewedRequiredCount = requiredFields.filter(f => reviewedFields.has(f.key)).length;
-                        
-                        const allReviewed = requiredCount === 0 || reviewedRequiredCount === requiredCount;
+                        const allReviewed = allFields.length === 0 || reviewedFields.size === allFields.length;
+                        const reviewedCount = reviewedFields.size;
+                        const totalCount = allFields.length;
                         const currentStatus = getStatus(selectedProduct.quality_verified);
 
                         return (
@@ -237,40 +311,63 @@ export default function ApprovalsPage() {
                                     <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                                         <div
                                             className="h-full bg-emerald-500 rounded-full transition-all duration-150"
-                                            style={{ width: `${requiredCount > 0 ? (reviewedRequiredCount / requiredCount) * 100 : 100}%` }}
+                                            style={{ width: `${totalCount > 0 ? (reviewedCount / totalCount) * 100 : 100}%` }}
                                         />
                                     </div>
                                     <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                        {reviewedRequiredCount} / {requiredCount} reviewed
+                                        {reviewedCount} / {totalCount} reviewed
                                     </span>
                                 </div>
 
+                                {/* View Drawing Button */}
+                                {(() => {
+                                    const drawingUrl = getDrawingUrl(selectedProduct);
+                                    return drawingUrl ? (
+                                        <div className="flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg">
+                                            <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center flex-shrink-0">
+                                                <FileImage className="w-4.5 h-4.5 text-purple-600" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="text-sm font-medium text-purple-900 dark:text-purple-200">Product Drawing Available</p>
+                                                <p className="text-xs text-purple-600 dark:text-purple-400">Click to view the drawing document</p>
+                                            </div>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="border-purple-300 text-purple-700 hover:bg-purple-100 hover:text-purple-800 gap-1.5"
+                                                onClick={() => window.open(drawingUrl, '_blank')}
+                                            >
+                                                <FileImage className="w-3.5 h-3.5" />
+                                                View Drawing
+                                            </Button>
+                                        </div>
+                                    ) : null;
+                                })()}
+
                                 {/* Field grid */}
                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
-                                    {activeFields.map(({ key, label }) => {
+                                    {allFields.map(({ key, label }) => {
                                         const isReviewed = reviewedFields.has(key);
-                                        const value = (selectedProduct as any)[key] || selectedProduct?.specification?.[key];
-                                        const isEdited = editedFields.includes(key);
-                                        const isRequired = requiredFields.some(f => f.key === key);
+                                        const topLevelMap: Record<string, string> = {
+                                            partNumber: 'part_number',
+                                            customer: 'customer',
+                                        };
+                                        const checkKey = topLevelMap[key] || key;
+                                        let value = (selectedProduct as any)[checkKey];
+                                        if (value === undefined) {
+                                            value = selectedProduct?.specification?.[key];
+                                        }
                                         
                                         return (
                                             <div
                                                 key={key}
-                                                onClick={() => isRequired && handleFieldClick(key)}
-                                                className={`relative rounded-lg border-2 p-3 transition-all duration-100 select-none
-                                                    ${isRequired ? "cursor-pointer" : "opacity-60 cursor-not-allowed"}
-                                                    ${isEdited ? "ring-2 ring-amber-400 ring-offset-1 border-amber-200 bg-amber-50/30 dark:bg-amber-900/20" : ""}
+                                                onClick={() => handleFieldClick(key)}
+                                                className={`relative cursor-pointer rounded-lg border-2 p-3 transition-all duration-100 select-none
                                                     ${isReviewed
                                                         ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
-                                                        : isRequired ? "border-border bg-card hover:border-muted-foreground/40 hover:bg-muted/40" : "border-transparent bg-muted/30"
+                                                        : "border-border bg-card hover:border-muted-foreground/40 hover:bg-muted/40"
                                                     }`}
                                             >
-                                                {/* Edit badge */}
-                                                {isEdited && (
-                                                    <span className="absolute -top-2 -left-2 bg-amber-400 text-amber-950 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm">
-                                                        EDITED
-                                                    </span>
-                                                )}
                                                 {/* Checkmark badge */}
                                                 {isReviewed && (
                                                     <span className="absolute top-2 right-2 text-emerald-600">
@@ -278,7 +375,7 @@ export default function ApprovalsPage() {
                                                     </span>
                                                 )}
                                                 <span className="text-muted-foreground block text-xs mb-1 pr-5">{label}</span>
-                                                <span className={`font-medium text-sm break-words ${isReviewed ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
+                                                <span className={`font-bold text-sm  break-words ${isReviewed ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
                                                     {value || "-"}
                                                 </span>
                                             </div>
@@ -286,11 +383,26 @@ export default function ApprovalsPage() {
                                     })}
                                 </div>
 
+                                {/* Remark field */}
+                                <div className="space-y-2 pt-2">
+                                    <Label htmlFor="quality-remark" className="text-sm font-medium">
+                                        Remark 
+                                    </Label>
+                                    <Textarea
+                                        id="quality-remark"
+                                        placeholder="Add a remark for this quality verification..."
+                                        value={remark}
+                                        onChange={(e) => setRemark(e.target.value)}
+                                        className="min-h-[80px] resize-none"
+                                        required
+                                    />
+                                </div>
+
                                 {/* Footer */}
                                 <DialogFooter className="flex flex-col sm:flex-row items-center gap-2 mt-6 pt-4 border-t">
                                     {!allReviewed && (
                                         <p className="text-xs text-amber-600 mr-auto">
-                                            ⚠ Review all {requiredCount - reviewedRequiredCount} remaining field(s) to enable approval.
+                                            ⚠ Review all {totalCount - reviewedCount} remaining field(s) to enable approval.
                                         </p>
                                     )}
                                     <Button variant="outline" onClick={handleCloseDialog}>

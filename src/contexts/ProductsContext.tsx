@@ -22,14 +22,18 @@ interface ProductsContextType {
   fetchProducts: (options?: FetchProductsOptions) => Promise<void>;
   fetchDropdownOptions: () => Promise<void>;
   getProductByPart: (partNumber: string) => Promise<Product | null>;
-  createProduct: (payload: any) => Promise<boolean>;
+  createProduct: (payload: any) => Promise<number | boolean>;
   updateProduct: (id: number, payload: any) => Promise<boolean>;
-  updateApproval: (id: number, status: 'approved' | 'rejected' | 'pending') => Promise<boolean>;
-  updateQuality: (id: number, status: 'approved' | 'rejected' | 'pending') => Promise<boolean>;
+  updateApproval: (id: number, status: 'approved' | 'rejected' | 'pending', remark?: string) => Promise<boolean>;
+  updateQuality: (id: number, status: 'approved' | 'rejected' | 'pending', remark?: string) => Promise<boolean>;
   importProducts: (rows: any[]) => Promise<boolean>;
   deleteProduct: (id: number) => Promise<boolean>;
-  uploadPpapDocument: (id: number, name: string, file: File) => Promise<boolean>;
-  deletePpapDocument: (id: number, fileName: string) => Promise<boolean>;
+  uploadDocument: (id: number, category: string, name: string, file: File) => Promise<Product | false>;
+  deleteDocument: (id: number, category: string, name: string) => Promise<Product | false>;
+  uploadProductImage: (id: number, label: string, file: File) => Promise<Record<string, string> | false>;
+  deleteProductImage: (id: number, label: string) => Promise<Record<string, string> | false>;
+  setInactive: (id: number, remark?: string) => Promise<boolean>;
+  markDocumentNotRequired: (id: number, category: string, name: string) => Promise<Product | false>;
 }
 
 const ProductsContext = createContext<ProductsContextType | undefined>(undefined);
@@ -101,13 +105,13 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const createProduct = async (payload: any) => {
+  const createProduct = async (payload: any): Promise<number | boolean> => {
     try {
       const response = await api.post<ApiResponse<Product>>("/products", payload);
       if (response.data.success) {
         toast.success("Product created successfully");
         await fetchProducts();
-        return true;
+        return response.data.data?.id || true;
       } else {
         toast.error(response.data.message || "Failed to create product");
         return false;
@@ -135,9 +139,9 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateApproval = async (id: number, status: 'approved' | 'rejected' | 'pending') => {
+  const updateApproval = async (id: number, status: 'approved' | 'rejected' | 'pending', remark?: string) => {
     try {
-      const response = await api.put<ApiResponse<Product>>(`/products/${id}/approval`, { status });
+      const response = await api.put<ApiResponse<Product>>(`/products/${id}/approval`, { status, remark: remark || '' });
       if (response.data.success) {
         toast.success(`Approval status updated to ${status}`);
         await fetchProducts();
@@ -152,9 +156,9 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateQuality = async (id: number, status: 'approved' | 'rejected' | 'pending') => {
+  const updateQuality = async (id: number, status: 'approved' | 'rejected' | 'pending', remark?: string) => {
     try {
-      const response = await api.put<ApiResponse<Product>>(`/products/${id}/quality`, { status });
+      const response = await api.put<ApiResponse<Product>>(`/products/${id}/quality`, { status, remark: remark || '' });
       if (response.data.success) {
         toast.success(`Quality status updated to ${status}`);
         await fetchProducts();
@@ -203,22 +207,44 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const uploadPpapDocument = async (id: number, name: string, file: File) => {
+  const setInactive = async (id: number, remark?: string) => {
+  try {
+    const response = await api.put<ApiResponse<Product>>(
+      `/products/${id}/inactive`,
+      { remark: remark || '' }
+    );
+
+    if (response.data.success) {
+      toast.success("Product marked as inactive");
+      await fetchProducts();
+      return true;
+    } else {
+      toast.error(response.data.message || "Failed to mark inactive");
+      return false;
+    }
+  } catch (err: any) {
+    toast.error(err.message || "Error updating product status");
+    return false;
+  }
+};
+
+  const uploadDocument = async (id: number, category: string, name: string, file: File): Promise<Product | false> => {
     try {
       const formData = new FormData();
       formData.append("name", name);
+      formData.append("category", category);
       formData.append("file", file);
 
-      const response = await api.put<ApiResponse<Product>>(`/products/${id}/ppap`, formData, {
+      const response = await api.put<ApiResponse<Product>>(`/products/${id}/documents`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
       });
 
-      if (response.data.success) {
+      if (response.data.success && response.data.data) {
         toast.success("Document uploaded successfully");
         await fetchProducts();
-        return true;
+        return response.data.data;
       } else {
         toast.error(response.data.message || "Failed to upload document");
         return false;
@@ -229,14 +255,14 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const deletePpapDocument = async (id: number, fileName: string) => {
+  const deleteDocument = async (id: number, category: string, name: string): Promise<Product | false> => {
     try {
-      const response = await api.delete<ApiResponse<Product>>(`/products/${id}/ppap/${encodeURIComponent(fileName)}`);
+      const response = await api.delete<ApiResponse<Product>>(`/products/${id}/documents/${encodeURIComponent(category)}/${encodeURIComponent(name)}`);
       
-      if (response.data.success) {
+      if (response.data.success && response.data.data) {
         toast.success("Document deleted successfully");
         await fetchProducts();
-        return true;
+        return response.data.data;
       } else {
         toast.error(response.data.message || "Failed to delete document");
         return false;
@@ -246,6 +272,73 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
       return false;
     }
   };
+
+  const uploadProductImage = async (id: number, label: string, file: File): Promise<Record<string, string> | false> => {
+    try {
+      const formData = new FormData();
+      formData.append("label", label);
+      formData.append("file", file);
+
+      const response = await api.post<ApiResponse<Record<string, string>>>(`/product-images/${id}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      if (response.data.success && response.data.data) {
+        toast.success("Image uploaded successfully");
+        await fetchProducts();
+        return response.data.data;
+      } else {
+        toast.error(response.data.message || "Failed to upload image");
+        return false;
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Error uploading product image");
+      return false;
+    }
+  };
+
+  const deleteProductImage = async (id: number, label: string): Promise<Record<string, string> | false> => {
+    try {
+      const response = await api.delete<ApiResponse<Record<string, string>>>(`/product-images/${id}/${encodeURIComponent(label)}`);
+
+      if (response.data.success && response.data.data) {
+        toast.success("Image deleted successfully");
+        await fetchProducts();
+        return response.data.data;
+      } else {
+        toast.error(response.data.message || "Failed to delete image");
+        return false;
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Error deleting product image");
+      return false;
+    }
+  };
+  const markDocumentNotRequired = async (
+  id: number,
+  category: string,
+  name: string
+): Promise<Product | false> => {
+  try {
+    const response = await api.patch<ApiResponse<Product>>(
+      `/products/${id}/documents/${encodeURIComponent(category)}/${encodeURIComponent(name)}/not-required`
+    );
+ 
+    if (response.data.success && response.data.data) {
+      toast.success("Marked as not required");
+      await fetchProducts();
+      return response.data.data;
+    } else {
+      toast.error(response.data.message || "Failed to update document");
+      return false;
+    }
+  } catch (err: any) {
+    toast.error(
+      err.response?.data?.message || err.message || "Error updating document"
+    );
+    return false;
+  }
+};
 
 
   useEffect(() => {
@@ -270,8 +363,12 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
         updateQuality,
         importProducts,
         deleteProduct,
-        uploadPpapDocument,
-        deletePpapDocument,
+        uploadDocument,
+        deleteDocument,
+        uploadProductImage,
+        deleteProductImage,
+        setInactive,
+        markDocumentNotRequired,
       }}
     >
       {children}
