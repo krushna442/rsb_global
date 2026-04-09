@@ -51,7 +51,6 @@ export const ROLE_ACCESS: Record<string, string[]> = {
     
     "viewer": [
         "/",
-        "/product-master",
         "/production-verification",
         "/documents",
         "/product-specifications",

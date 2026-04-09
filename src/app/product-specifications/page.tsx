@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useProducts } from "@/contexts/ProductsContext";
 import { useUser } from "@/contexts/UserContext";
@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/dialog";
 import { FileImage, ScanLine, FileText, Eye } from "lucide-react";
 import { QRScanner } from "@/components/qr-scanner";
+import { fetchFieldImages, getFieldImageUrl, FieldImageRecord } from "@/lib/fieldImageApi";
+import { Card, CardContent } from "@/components/ui/card";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -97,12 +99,25 @@ export default function ProductSpecificationsPage() {
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const [viewDrawingUrl, setViewDrawingUrl] = useState<string | null>(null);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [fieldImageRecords, setFieldImageRecords] = useState<FieldImageRecord[]>([]);
+
+    useEffect(() => {
+        const loadImages = async () => {
+            try {
+                const data = await fetchFieldImages();
+                setFieldImageRecords(data);
+            } catch (err) {
+                console.error("Failed to fetch field images", err);
+            }
+        };
+        loadImages();
+    }, []);
 
     // ── important fields: set of valueKey names that should blink ────────────
     const importantFieldNames = new Set<string>(dynamicFields?.important_fields ?? []);
 
     const handleSearch = (searchQuery?: string | any) => {
-        const term = typeof searchQuery === "string" ? searchQuery : searchTerm;
+        const term = typeof searchQuery === "string" ? searchQuery : searchTerm.trim();
         if (!term.trim()) return;
         const matched = products.find(
             (p) => p.part_number.toLowerCase() === term.toLowerCase()
@@ -293,7 +308,7 @@ export default function ProductSpecificationsPage() {
 
                 {/* ── SPEC GRID ── */}
                 <div style={{ padding: "12px 14px 24px" }}>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
+                    <div className="grid grid-cols-4 gap-4">
                         {filteredSpecs.map((spec) => {
                             const val = partInfo?.[spec.valueKey]
                                      ?? partInfo?.specification?.[spec.valueKey];
@@ -339,11 +354,11 @@ export default function ProductSpecificationsPage() {
 
                                     {/* Value shell — blinks when important */}
                                     <div style={{
-                                        background: "#ffff33",
+                                        background: isImportant ? "#e53935" : "#ffff33",
                                         border: isImportant ? "3px solid #e53935" : "2px solid #c8b800",
                                         borderRadius: "5px",
                                         padding: "10px 16px",
-                                        fontSize: "26px",
+                                        fontSize: "21px",
                                         fontWeight: "900",
                                         color: "#0d1b8e",
                                         minHeight: "52px",
@@ -366,6 +381,87 @@ export default function ProductSpecificationsPage() {
                         })}
                     </div>
                 </div>
+
+                {/* ── REFERENCE IMAGES (DYNAMIC) ── */}
+                {partInfo && (
+                    <div style={{ padding: "0 14px 40px" }}>
+                        {(() => {
+                            // Find matching images: 
+                            // record.field_name could be valueKey, label, or id from ALL_SPECS
+                            // record.option_value must match partInfo[key]
+                            const matchingImages = fieldImageRecords.filter(rec => {
+                                const spec = ALL_SPECS.find(s => 
+                                    s.valueKey.toLowerCase() === rec.field_name.toLowerCase() ||
+                                    s.label.toLowerCase() === rec.field_name.toLowerCase() ||
+                                    s.id.toLowerCase() === rec.field_name.toLowerCase()
+                                );
+                                
+                                if (!spec) return false;
+
+                                const val = partInfo[spec.valueKey] ?? partInfo.specification?.[spec.valueKey] ?? partInfo[spec.id];
+                                if (val === undefined || val === null || val === "") return false;
+
+                                return String(val).trim().toLowerCase() === rec.option_value.trim().toLowerCase();
+                            });
+
+                            if (matchingImages.length === 0) return null;
+
+                            return (
+                                <>
+                                    <div className="flex items-center gap-3 mb-6 mt-4">
+                                        <div className="h-8 w-1.5 bg-[#007a6e] rounded-full" />
+                                        <h2 style={{ 
+                                            fontSize: "24px", 
+                                            fontWeight: "900", 
+                                            color: "#007a6e", 
+                                            letterSpacing: "0.5px",
+                                            textTransform: "uppercase"
+                                        }}>
+                                            Reference  Images
+                                        </h2>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        {matchingImages.map((img) => {
+                                            const specLabel = ALL_SPECS.find(s => 
+                                                s.valueKey.toLowerCase() === img.field_name.toLowerCase() ||
+                                                s.label.toLowerCase() === img.field_name.toLowerCase() ||
+                                                s.id.toLowerCase() === img.field_name.toLowerCase()
+                                            )?.label || img.field_name;
+
+                                            return (
+                                                <Card key={img.id} className="border-0 shadow-lg pb-4 overflow-hidden bg-white ring-1 ring-black/5 hover:ring-black/10 transition-all duration-300 p-0">
+                                                    <CardContent className="p-0 w-full">
+                                                        <div className=" bg-gradient-to-r from-[#007a6e] to-[#00897b] text-white px-5 py-2 flex justify-between items-center">
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[10px] font-bold uppercase opacity-80 tracking-widest"></span>
+                                                                <span className="text-sm font-black">{specLabel}</span>
+                                                            </div>
+                                                            <div className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-md border border-white/30">
+                                                                <span className="text-xs font-bold">{img.option_value}</span>
+                                                            </div>
+                                                        </div>
+                                                        <div 
+                                                            className="aspect-video relative overflow-hidden bg-[#f0f4f3] flex items-center justify-center cursor-zoom-in group"
+                                                            onClick={() => setSelectedImage(getFieldImageUrl(img.file_path))}
+                                                        >
+                                                            <div className="absolute inset-0 bg-grid-slate-200/50 [mask-image:linear-gradient(0deg,#fff,rgba(255,255,255,0.6))] -z-0" />
+                                                            <img 
+                                                                src={getFieldImageUrl(img.file_path)} 
+                                                                alt={`${specLabel}: ${img.option_value}`}
+                                                                className="w-full h-full  object-contain relative z-10 drop-shadow-md transition-transform duration-500 "
+                                                            />
+
+                                                        </div>
+                                                    </CardContent>
+                                                </Card>
+                                            );
+                                        })}
+                                    </div>
+                                </>
+                            );
+                        })()}
+                    </div>
+                )}
 
                 {/* Image dialog */}
                 <Dialog open={!!selectedImage} onOpenChange={(o) => !o && setSelectedImage(null)}>

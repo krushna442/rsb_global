@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,11 +34,24 @@ import {
     ChevronUp,
     MinusCircle,
     AlertCircle,
+    ImageIcon,
+    Plus,
+    Loader2,
 } from "lucide-react";
 import { useProducts } from "@/contexts/ProductsContext";
-import { useUser } from "@/contexts/UserContext"; // adjust import path as needed
+import { useUser } from "@/contexts/UserContext";
 import { Product } from "@/types/api";
 import ExcelJS from "exceljs";
+import {
+    fetchFieldDefinitions,
+    fetchFieldImages,
+    uploadFieldImage as uploadFieldImageApi,
+    deleteFieldImage,
+    getFieldImageUrl,
+    FieldImageRecord,
+    FieldDefinition,
+} from "@/lib/fieldImageApi";
+import { toast } from "sonner";
 // exceljs + file-saver are imported dynamically inside handleDownloadExcel
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -632,14 +645,380 @@ function NonAdminView({
     );
 }
 
+// ─── Field Images Section ─────────────────────────────────────────────────────
+
+function FieldImagesSection({ isAdmin }: { isAdmin: boolean }) {
+    const [fields, setFields] = useState<FieldDefinition[]>([]);
+    const [records, setRecords] = useState<FieldImageRecord[]>([]);
+    const [loadingData, setLoadingData] = useState(true);
+    const [selectedField, setSelectedField] = useState<string>("all");
+    const [viewImage, setViewImage] = useState<{ url: string; label: string } | null>(null);
+    const [uploading, setUploading] = useState(false);
+    const [deletingId, setDeletingId] = useState<number | null>(null);
+    const [uploadForm, setUploadForm] = useState<{ fieldName: string; optionValue: string } | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [searchQuery, setSearchQuery] = useState("");
+
+    const loadData = useCallback(async () => {
+        setLoadingData(true);
+        try {
+            const [fieldDefs, imgs] = await Promise.all([
+                fetchFieldDefinitions(),
+                fetchFieldImages(),
+            ]);
+            setFields(fieldDefs);
+            setRecords(imgs);
+        } catch (err) {
+            console.error("Failed to load field images:", err);
+            toast.error("Failed to load field images");
+        } finally {
+            setLoadingData(false);
+        }
+    }, []);
+
+    useEffect(() => { loadData(); }, [loadData]);
+
+    const filteredRecords = useMemo(() => {
+        let list = records;
+        if (selectedField !== "all") list = list.filter(r => r.field_name === selectedField);
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.filter(
+                r => r.field_name.toLowerCase().includes(q) || r.option_value.toLowerCase().includes(q)
+            );
+        }
+        return list;
+    }, [records, selectedField, searchQuery]);
+
+    const handleUploadClick = (fieldName: string, optionValue: string) => {
+        setUploadForm({ fieldName, optionValue });
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !uploadForm) return;
+        setUploading(true);
+        try {
+            await uploadFieldImageApi(uploadForm.fieldName, uploadForm.optionValue, file);
+            toast.success("Field image uploaded successfully");
+            await loadData();
+        } catch (err: any) {
+            toast.error(err?.message ?? "Upload failed");
+        } finally {
+            setUploading(false);
+            setUploadForm(null);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+
+    const handleDelete = async (id: number) => {
+        setDeletingId(id);
+        try {
+            await deleteFieldImage(id);
+            toast.success("Field image deleted");
+            setRecords(prev => prev.filter(r => r.id !== id));
+        } catch {
+            toast.error("Failed to delete field image");
+        } finally {
+            setDeletingId(null);
+        }
+    };
+
+    // Group all field+option combos from definitions
+    const allFieldOptions = useMemo(() => {
+        const result: { fieldName: string; optionValue: string }[] = [];
+        fields.forEach(f => {
+            f.options.forEach(opt => result.push({ fieldName: f.field_name, optionValue: opt }));
+        });
+        return result;
+    }, [fields]);
+
+    return (
+        <div className="space-y-5">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                    <h2 className="text-lg font-bold tracking-tight flex items-center gap-2">
+                        <ImageIcon className="w-5 h-5 text-violet-500" />
+                        Field Images
+                    </h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                        Reference images linked to specific field option values
+                    </p>
+                </div>
+
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-wrap gap-3 items-center">
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                        placeholder="Search field or value..."
+                        className="pl-9 h-9 text-sm w-56"
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                    />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                    <button
+                        onClick={() => setSelectedField("all")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                            selectedField === "all"
+                                ? "bg-violet-600 text-white border-violet-600"
+                                : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted"
+                        }`}
+                    >
+                        All Fields
+                    </button>
+                    {fields.map(f => (
+                        <button
+                            key={f.field_name}
+                            onClick={() => setSelectedField(f.field_name)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                                selectedField === f.field_name
+                                    ? "bg-violet-600 text-white border-violet-600"
+                                    : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted"
+                            }`}
+                        >
+                            {f.field_name}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {/* Content */}
+            {loadingData ? (
+                <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+                    <Loader2 className="w-5 h-5 animate-spin" /> Loading field images...
+                </div>
+            ) : (
+                <>
+                    {/* Upload Grid for admins — shows all field/option combos with upload status */}
+                    {isAdmin && allFieldOptions.length > 0 && (
+                        <Card className="border-0 shadow-sm">
+                            <CardContent className="p-4">
+                                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Upload by Field &amp; Option</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                                    {allFieldOptions
+                                        .filter(fo =>
+                                            selectedField === "all" || fo.fieldName === selectedField
+                                        )
+                                        .map(fo => {
+                                            const existing = records.find(
+                                                r => r.field_name === fo.fieldName && r.option_value === fo.optionValue
+                                            );
+                                            return (
+                                                <div
+                                                    key={`${fo.fieldName}::${fo.optionValue}`}
+                                                    className={`relative rounded-xl border-2 overflow-hidden transition-all ${
+                                                        existing
+                                                            ? "border-emerald-200 bg-emerald-50/50"
+                                                            : "border-dashed border-muted-foreground/25 bg-muted/20"
+                                                    }`}
+                                                >
+                                                    {/* Image preview */}
+                                                    {existing ? (
+                                                        <div
+                                                            className="relative w-full h-28 cursor-pointer group"
+                                                            onClick={() => setViewImage({ url: getFieldImageUrl(existing.file_path), label: `${fo.fieldName} — ${fo.optionValue}` })}
+                                                        >
+                                                            {existing.file_path.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? (
+                                                                <img
+                                                                    src={getFieldImageUrl(existing.file_path)}
+                                                                    alt={fo.optionValue}
+                                                                    className="w-full h-full object-cover"
+                                                                />
+                                                            ) : (
+                                                                <div className="w-full h-full flex items-center justify-center">
+                                                                    <FileText className="w-10 h-10 text-emerald-500" />
+                                                                </div>
+                                                            )}
+                                                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                                                <Eye className="w-6 h-6 text-white" />
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="w-full h-28 flex items-center justify-center text-muted-foreground/40">
+                                                            <ImageIcon className="w-10 h-10" />
+                                                        </div>
+                                                    )}
+
+                                                    {/* Info + actions */}
+                                                    <div className="px-3 pb-2 pt-1">
+                                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide truncate" title={fo.fieldName}>{fo.fieldName}</p>
+                                                        <p className="text-xs font-semibold truncate" title={fo.optionValue}>{fo.optionValue}</p>
+                                                        <div className="flex items-center gap-1 mt-2">
+                                                            <button
+                                                                onClick={() => handleUploadClick(fo.fieldName, fo.optionValue)}
+                                                                disabled={uploading}
+                                                                className="flex-1 inline-flex items-center justify-center gap-1 py-1 rounded-md bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-semibold transition-all disabled:opacity-40"
+                                                                title={existing ? "Re-upload" : "Upload"}
+                                                            >
+                                                                <Upload className="w-3 h-3" />
+                                                                {existing ? "Replace" : "Upload"}
+                                                            </button>
+                                                            {existing && (
+                                                                <button
+                                                                    onClick={() => handleDelete(existing.id)}
+                                                                    disabled={deletingId === existing.id}
+                                                                    className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-red-50 hover:bg-red-100 text-red-500 transition-all disabled:opacity-40"
+                                                                    title="Delete"
+                                                                >
+                                                                    {deletingId === existing.id
+                                                                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                                                                        : <Trash2 className="w-3 h-3" />
+                                                                    }
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {/* Records table */}
+                    {filteredRecords.length > 0 ? (
+                        <Card className="border-0 shadow-sm overflow-hidden">
+                            <CardContent className="p-0">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow className="bg-muted/20 hover:bg-muted/20">
+                                            <TableHead className="text-xs font-bold uppercase tracking-wider text-muted-foreground pl-4">Field Name</TableHead>
+                                            <TableHead className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Option Value</TableHead>
+                                            <TableHead className="text-xs font-bold uppercase tracking-wider text-muted-foreground text-center">Preview</TableHead>
+                                            <TableHead className="text-xs font-bold uppercase tracking-wider text-muted-foreground text-center">Actions</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {filteredRecords.map(record => (
+                                            <TableRow key={record.id} className="group hover:bg-muted/10 transition-colors">
+                                                <TableCell className="pl-4 font-mono text-xs font-semibold">{record.field_name}</TableCell>
+                                                <TableCell className="text-sm font-medium">{record.option_value}</TableCell>
+                                                <TableCell className="text-center">
+                                                    {record.file_path.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? (
+                                                        <img
+                                                            src={getFieldImageUrl(record.file_path)}
+                                                            alt={record.option_value}
+                                                            className="w-12 h-10 object-cover rounded-lg mx-auto cursor-pointer hover:scale-105 transition-transform"
+                                                            onClick={() => setViewImage({ url: getFieldImageUrl(record.file_path), label: `${record.field_name} — ${record.option_value}` })}
+                                                        />
+                                                    ) : (
+                                                        <button
+                                                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 mx-auto"
+                                                            onClick={() => setViewImage({ url: getFieldImageUrl(record.file_path), label: `${record.field_name} — ${record.option_value}` })}
+                                                        >
+                                                            <FileText className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                </TableCell>
+                                                <TableCell className="text-center">
+                                                    <div className="flex items-center justify-center gap-1.5">
+                                                        <button
+                                                            onClick={() => setViewImage({ url: getFieldImageUrl(record.file_path), label: `${record.field_name} — ${record.option_value}` })}
+                                                            className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 transition-all"
+                                                            title="View"
+                                                        >
+                                                            <Eye className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        {isAdmin && (
+                                                            <>
+                                                                <button
+                                                                    onClick={() => handleUploadClick(record.field_name, record.option_value)}
+                                                                    disabled={uploading}
+                                                                    className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-600 transition-all disabled:opacity-40"
+                                                                    title="Re-upload"
+                                                                >
+                                                                    <Upload className="w-3.5 h-3.5" />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleDelete(record.id)}
+                                                                    disabled={deletingId === record.id}
+                                                                    className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 transition-all disabled:opacity-40"
+                                                                    title="Delete"
+                                                                >
+                                                                    {deletingId === record.id
+                                                                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                                                                        : <Trash2 className="w-3.5 h-3.5" />
+                                                                    }
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
+                    ) : (
+                        !isAdmin && (
+                            <div className="text-center py-16 text-muted-foreground">
+                                <ImageIcon className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                                <p className="text-sm">No field images found.</p>
+                            </div>
+                        )
+                    )}
+                </>
+            )}
+
+            {/* Hidden file input */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".jpg,.jpeg,.png,.gif,.webp,.pdf"
+                onChange={handleFileChange}
+            />
+
+            {/* Image / File viewer */}
+            <Dialog open={!!viewImage} onOpenChange={o => !o && setViewImage(null)}>
+                <DialogContent className="!max-w-4xl h-[90vh] flex flex-col p-0 overflow-hidden">
+                    <div className="flex items-center gap-3 px-6 py-4 border-b bg-muted/10">
+                        <ImageIcon className="w-5 h-5 text-violet-500" />
+                        <DialogTitle>{viewImage?.label}</DialogTitle>
+                    </div>
+                    <div className="flex-1 p-4 bg-muted/10 flex items-center justify-center">
+                        {viewImage && (
+                            <div className="w-full h-full min-h-[500px] bg-background border rounded-xl overflow-hidden flex items-center justify-center">
+                                {viewImage.url.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? (
+                                    <img
+                                        src={viewImage.url}
+                                        alt={viewImage.label}
+                                        className="max-w-full max-h-full object-contain p-4"
+                                    />
+                                ) : (
+                                    <iframe
+                                        src={viewImage.url}
+                                        className="w-full h-full border-0"
+                                        title={viewImage.label}
+                                    />
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function DocumentsPage() {
     const { products, loading, uploadDocument, deleteDocument, markDocumentNotRequired } = useProducts();
-    const { user } = useUser(); // { role, document_name_array, ... }
+    const { user } = useUser();
 
     const isAdminOrSuper =
         user?.role === "admin" || user?.role === "super admin";
+
+    const [activeTab, setActiveTab] = useState<"documents" | "field-images">("documents");
 
     const [searchQuery, setSearchQuery] = useState("");
     const [viewDoc, setViewDoc] = useState<{
@@ -1037,6 +1416,39 @@ export default function DocumentsPage() {
                     </div>
                 </div>
 
+                {/* Tab switcher */}
+                <div className="flex gap-1 p-1 bg-muted/40 rounded-xl w-fit border">
+                    <button
+                        onClick={() => setActiveTab("documents")}
+                        className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+                            activeTab === "documents"
+                                ? "bg-background shadow-sm text-foreground"
+                                : "text-muted-foreground hover:text-foreground"
+                        }`}
+                    >
+                        <FileText className="w-4 h-4" /> Product Documents
+                    </button>
+                    <button
+                        onClick={() => setActiveTab("field-images")}
+                        className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+                            activeTab === "field-images"
+                                ? "bg-background shadow-sm text-foreground"
+                                : "text-muted-foreground hover:text-foreground"
+                        }`}
+                    >
+                        <ImageIcon className="w-4 h-4" /> Field Images
+                    </button>
+                </div>
+
+                {/* ── FIELD IMAGES TAB ── */}
+                {activeTab === "field-images" && (
+                    <FieldImagesSection isAdmin={isAdminOrSuper} />
+                )}
+
+                {/* ── DOCUMENTS TAB ── */}
+                {activeTab === "documents" && (
+                <>
+
                 {/* Vacancy banner */}
                 <VacancyBanner items={vacancyItems} />
 
@@ -1385,7 +1797,9 @@ export default function DocumentsPage() {
                         </div>
                     </CardContent>
                 </Card>
-            </div>
+
+            </>
+            )}
 
             {/* Document Viewer */}
             <Dialog
@@ -1446,6 +1860,8 @@ export default function DocumentsPage() {
                 onMarkNotRequired={handleMarkNotRequired}
                 onUnmarkNotRequired={handleUnmarkNotRequired}
             />
+
+            </div>
         </DashboardLayout>
     );
 }

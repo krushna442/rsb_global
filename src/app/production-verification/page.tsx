@@ -65,6 +65,17 @@ const handleOpenScannerMode = useCallback((mode: "camera" | "external") => {
     const [mismatchedFields, setMismatchedFields] = useState<Set<string>>(new Set());
     // The DB spec values fetched for the last scanned part (for display in the details box)
     const [scannedSpec, setScannedSpec] = useState<Record<string, string>>({});
+    // The user's form values at the moment of scanning (for display in the details box if mismatch)
+    const [scannedUserValues, setScannedUserValues] = useState<Record<string, string>>({});
+
+    const handleClearScan = useCallback(() => {
+        setScannedLabel("");
+        setPartSlNo("");
+        setExtractedPartNo("");
+        setMismatchedFields(new Set());
+        setScannedSpec({});
+        setScannedUserValues({});
+    }, []);
 
     const dedupe = (arr: string[] | undefined) => arr?.length ? Array.from(new Set(arr)) : undefined;
 
@@ -121,8 +132,12 @@ const handleOpenScannerMode = useCallback((mode: "camera" | "external") => {
         console.log("🔍 Raw Scanned Text:", decodedText);
         console.log("📦 Extracted Part Number:", partNo);
         console.log("🔢 Extracted Serial Number:", extractedSlNo);
+
+        const finalSlNo = (partSlNo && partSlNo.trim() !== "") ? partSlNo : extractedSlNo;
+        console.log("✅ Using Serial Number:", finalSlNo);
+
         setExtractedPartNo(partNo);
-        setPartSlNo(extractedSlNo);
+        setPartSlNo(finalSlNo);
         // Look up DB record
         const matchedProduct = products.find(p => p.part_number === partNo);
 
@@ -154,14 +169,30 @@ const handleOpenScannerMode = useCallback((mode: "camera" | "external") => {
             couplingFlange: dbCouplingFlange,
         });
 
+        // Store User form values for the Scanned Label Details box
+        setScannedUserValues({
+            customer:       formCustomer,
+            productType:    formProductType,
+            tubeDia:        formTubeDia,
+            tubeLength:     formTubeLength,
+            jointType:      formJointType,
+            cFlangeOrient:  formCFlangeOrientation,
+            flangeYoke:     formFlangeYoke,
+            couplingFlange: formCouplingFlange,
+        });
+
         // Compare user-filled form values vs DB expected values
         const mismatches = new Set<string>();
-        const compare = (formVal: string, dbVal: string, key: string) => {
-            // Only flag if DB has a value and they differ (case-insensitive trim)
-            if (dbVal && formVal.trim().toLowerCase() !== dbVal.trim().toLowerCase()) {
-                mismatches.add(key);
-            }
-        };
+const compare = (formVal: string, dbVal: string, key: string) => {
+    if (!dbVal) return;
+    const dbValues = dbVal.trim().toLowerCase().split(',').map(v => v.trim());
+    if (!dbValues.includes(formVal.trim().toLowerCase())) {
+        mismatches.add(key);
+        console.log(`   ❌ MISMATCH [${key}]: form="${formVal}" vs db="${dbVal}"`);
+    } else {
+        console.log(`   ✅ MATCH    [${key}]: "${formVal}"`);
+    }
+};
 
         compare(formCustomer,           dbCustomer,       "customer");
         compare(formProductType,        dbProductType,    "productType");
@@ -194,7 +225,7 @@ const handleOpenScannerMode = useCallback((mode: "camera" | "external") => {
             customer_name: formCustomer || "Unknown",
             product_type: formProductType || "Unknown",
             scanned_text: decodedText,
-            part_sl_no: extractedSlNo,
+            part_sl_no: finalSlNo,
             plant_location: plant,
             vendorCode: matchedProduct.specification?.vendorCode || "N/A",
             scanned_specification: {
@@ -207,16 +238,13 @@ const handleOpenScannerMode = useCallback((mode: "camera" | "external") => {
             },
         });
 
-        if (hasMismatch) {
-            toast.error(`Verification failed — ${mismatches.size} field(s) mismatch. Check highlighted values below.`);
-        } else {
-            toast.success("Verification passed — all fields match!");
-        }
+
 
         // NOTE: Form fields are intentionally NOT reset here.
         // The user can change only the fields that differ before the next scan.
     }, [
         products,
+        partSlNo,
         formCustomer, formProductType, formTubeDia, formTubeLength,
         formJointType, formCFlangeOrientation, formFlangeYoke, formCouplingFlange,
         plant, recordScan,
@@ -250,41 +278,46 @@ const handleOpenScannerMode = useCallback((mode: "camera" | "external") => {
     </div>
     <div className="flex items-center gap-2">
         <Label className="w-24 shrink-0">Part Sl NO.</Label>
-        <Input value={partSlNo} readOnly className="h-9 bg-muted/50" />
+        <Input value={partSlNo} onChange={e => setPartSlNo(e.target.value)}  className="h-9 bg-muted/50" />
     </div>
     <div className="flex items-center justify-end flex-col gap-2">
         <div className="flex  w-full">
 
         <Label className="w-24 shrink-0">Scanned Label</Label>
-        {/* ✅ Read-only — no X button, no inline Scan button */}
-        <Input
-            value={scannedLabel}
-            readOnly
-            className="h-9 flex-1 bg-muted/50 cursor-default"
-            placeholder="Scan to populate"
-        />
+        <div className="relative flex-1">
+            <Input
+                value={scannedLabel}
+                onChange={e => setScannedLabel(e.target.value)}
+                onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                        handleScan(scannedLabel);
+                    }
+                }}
+                className="h-9 w-full pr-8"
+                placeholder="Scan to populate"
+            />
+            {scannedLabel && (
+                <button
+                    onClick={handleClearScan}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    title="Clear scan"
+                >
+                    <X className="w-4 h-4" />
+                </button>
+            )}
+        </div>
         </div>
         <div className="flex items-center gap-3 mb-6">
-    <span className="text-xs text-muted-foreground font-medium">Scan via:</span>
-    <Button
-        size="sm"
-        variant="outline"
-        className="h-8 gap-2 text-xs"
-        onClick={() => handleOpenScannerMode("camera")}
-    >
-        <Camera className="w-3.5 h-3.5" />
-        Camera
-    </Button>
-    <Button
-        size="sm"
-        variant="outline"
-        className="h-8 gap-2 text-xs"
-        onClick={() => handleOpenScannerMode("external")}
-    >
-        <Keyboard className="w-3.5 h-3.5" />
-        External Device
-    </Button>
-</div>
+            <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-2 text-xs"
+                onClick={() => handleOpenScannerMode("camera")}
+            >
+                <Camera className="w-3.5 h-3.5" />
+                Scan via Camera
+            </Button>
+        </div>
     </div>
 </div>
 
@@ -337,7 +370,7 @@ const handleOpenScannerMode = useCallback((mode: "camera" | "external") => {
                                 <Label className="text-muted-foreground w-1/2">Coupling Flange</Label>
                                 <Select value={formCouplingFlange} onValueChange={val => val && setFormCouplingFlange(val)} disabled={isFlangeDisabled}>
                                     <SelectTrigger className="h-9 w-1/2"><SelectValue placeholder="Select Coupling" /></SelectTrigger>
-                                    <SelectContent>{activeCouplingFlangeOptions.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+                                    <SelectContent className="">{activeCouplingFlangeOptions.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
                                 </Select>
                             </div>
 
@@ -367,15 +400,15 @@ const handleOpenScannerMode = useCallback((mode: "camera" | "external") => {
                                 <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-xs">
                                     {[
                                         { label: "Part No.",      val: extractedPartNo,            cls: "font-semibold text-primary", key: "" },
-                                        { label: "Customer:",     val: scannedSpec.customer,       key: "customer" },
-                                        { label: "JT:",           val: scannedSpec.jointType,      key: "jointType" },
+                                        { label: "Customer:",     val: mismatchedFields.has("customer") ? scannedUserValues.customer : scannedSpec.customer,       key: "customer" },
+                                        { label: "JT:",           val: mismatchedFields.has("jointType") ? scannedUserValues.jointType : scannedSpec.jointType,      key: "jointType" },
                                         { label: "Stickers Count:", val: "1",                      key: "" },
-                                        { label: "Length:",       val: scannedSpec.tubeLength,     key: "tubeLength" },
-                                        { label: "Type:",         val: scannedSpec.productType,    key: "productType" },
-                                        { label: "C_Flange:",     val: scannedSpec.cFlangeOrient,  key: "cFlangeOrient" },
-                                        { label: "Flange Yoke:",  val: scannedSpec.flangeYoke,     key: "flangeYoke" },
+                                        { label: "Length:",       val: mismatchedFields.has("tubeLength") ? scannedUserValues.tubeLength : scannedSpec.tubeLength,     key: "tubeLength" },
+                                        { label: "Type:",         val: mismatchedFields.has("productType") ? scannedUserValues.productType : scannedSpec.productType,    key: "productType" },
+                                        { label: "C_Flange:",     val: mismatchedFields.has("cFlangeOrient") ? scannedUserValues.cFlangeOrient : scannedSpec.cFlangeOrient,  key: "cFlangeOrient" },
+                                        { label: "Flange Yoke:",  val: mismatchedFields.has("flangeYoke") ? scannedUserValues.flangeYoke : scannedSpec.flangeYoke,     key: "flangeYoke" },
                                         { label: "CB Kit:",       val: "-",                        key: "" },
-                                        { label: "Coupling Flge:", val: scannedSpec.couplingFlange, key: "couplingFlange" },
+                                        { label: "Coupling Flge:", val: mismatchedFields.has("couplingFlange") ? scannedUserValues.couplingFlange : scannedSpec.couplingFlange, key: "couplingFlange" },
                                     ].map(({ label, val, cls, key }) => (
                                         <div key={label}>
                                             <span className="text-muted-foreground inline-block w-24">{label}</span>

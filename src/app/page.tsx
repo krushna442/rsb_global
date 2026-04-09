@@ -56,7 +56,7 @@ export default function DashboardPage() {
   const stats = useMemo(() => [
     {
       title: "Total Products",
-      value: counts?.total.toLocaleString() || "0",
+      value: (counts?.total ?? 0).toLocaleString(),
       change: "+0%",
       trend: "up",
       icon: Package,
@@ -65,7 +65,7 @@ export default function DashboardPage() {
     },
     {
       title: "Pending Approvals",
-      value: counts?.approval_pending.toLocaleString() || "0",
+      value: (counts?.approval_pending ?? 0).toLocaleString(),
       change: "0%",
       trend: "down",
       icon: Clock,
@@ -74,7 +74,7 @@ export default function DashboardPage() {
     },
     {
       title: "Verified Products",
-      value: counts?.qv_approved.toLocaleString() || "0",
+      value: (counts?.qv_approved ?? 0).toLocaleString(),
       change: "+0%",
       trend: "up",
       icon: CheckCircle2,
@@ -83,7 +83,7 @@ export default function DashboardPage() {
     },
     {
       title: "Rejected Products",
-      value: counts?.rejected.toLocaleString() || "0",
+      value: (counts?.rejected ?? 0).toLocaleString(),
       change: "0%",
       trend: "up",
       icon: XCircle,
@@ -92,7 +92,7 @@ export default function DashboardPage() {
     },
     {
       title: "Production Checks Today",
-      value: scannedProducts.length.toLocaleString(),
+      value: (scannedProducts?.length ?? 0).toLocaleString(),
       change: "+0%",
       trend: "up",
       icon: ClipboardCheck,
@@ -106,10 +106,10 @@ export default function DashboardPage() {
     if (!counts) return [];
     const total = counts.total || 1;
     return [
-      { name: "Approved", value: Math.round((counts.approved / total) * 100), color: "#16a34a" },
-      { name: "Pending", value: Math.round((counts.approval_pending / total) * 100), color: "#ea580c" },
-      { name: "Rejected", value: Math.round((counts.approval_rejected / total) * 100), color: "#dc2626" },
-      { name: "In Review", value: Math.round((counts.qv_pending / total) * 100), color: "#2563eb" },
+      { name: "Approved", value: Math.round(((counts.approved ?? 0) / total) * 100), color: "#16a34a" },
+      { name: "Pending", value: Math.round(((counts.approval_pending ?? 0) / total) * 100), color: "#ea580c" },
+      { name: "Rejected", value: Math.round(((counts.approval_rejected ?? 0) / total) * 100), color: "#dc2626" },
+      { name: "In Review", value: Math.round(((counts.qv_pending ?? 0) / total) * 100), color: "#2563eb" },
     ];
   }, [counts]);
 
@@ -119,7 +119,7 @@ export default function DashboardPage() {
       "6AM": 0, "8AM": 0, "10AM": 0, "12PM": 0, "2PM": 0, "4PM": 0, "6PM": 0, "8PM": 0
     };
     
-    scannedProducts.forEach(scan => {
+    scannedProducts?.forEach(scan => {
       const date = new Date(scan.created_at);
       const hour = date.getHours();
       if (hour < 8) buckets["6AM"]++;
@@ -367,13 +367,13 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border/30">
-              {scannedProducts.length === 0 ? (
+              {(scannedProducts?.length ?? 0) === 0 ? (
                 <div className="py-12 flex flex-col items-center justify-center text-muted-foreground">
                   <ClipboardCheck className="w-8 h-8 mb-2 opacity-20" />
                   <p className="text-sm">No scans recorded today</p>
                 </div>
               ) : (
-                scannedProducts.slice(0, 10).map((activity) => (
+                (scannedProducts || []).slice(0, 10).map((activity) => (
                   <div key={activity.id} className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors group">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-xl bg-muted/50 flex items-center justify-center group-hover:bg-background transition-colors border border-border/50">

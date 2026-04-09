@@ -304,7 +304,7 @@ export default function UsersPage() {
                                             </div>
                                             <div className="flex-1 overflow-y-auto">
                                                 {allDocs.map((doc, idx) => (
-                                                    <div key={doc} className={`grid grid-cols-[60px_1fr] p-2 text-sm items-center border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                                                    <div key={idx} className={`grid grid-cols-[60px_1fr] p-2 text-sm items-center border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
                                                         <div className="pl-1">
                                                             <Checkbox 
                                                                 checked={documentArray.includes(doc)}
