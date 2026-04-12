@@ -19,6 +19,7 @@ import {
     ChevronRight,
     Sliders,
     BarChart3,
+    Notebook
 } from "lucide-react";
 import { useState } from "react";
 import { useUser } from "@/contexts/UserContext";
@@ -28,12 +29,14 @@ const menuItems = [
     { label: "Dashboard", icon: LayoutDashboard, href: "/" },
     { label: "Product Master", icon: Package, href: "/product-master" },
     { label: "Production Approval", icon: CheckCircle2, href: "/approvals" },
-    { label: "Production Verification", icon: ClipboardCheck, href: "/production-verification" },
-    { label: "Quality Verification", icon: ShieldCheck, href: "/quality-verification" },
+    { label: "Product Scanning", icon: ClipboardCheck, href: "/production-verification" },
+    { label: "Quality Approval", icon: ShieldCheck, href: "/quality-verification" },
     { label: "Documents", icon: FileText, href: "/documents" },
+    { label: "Control Plan", icon: ListChecks, href: "/control-plan" },
     { label: "Product Specifications", icon: ClipboardCheck, href: "/product-specifications" },
     { label: "Dynamic Fields", icon: Sliders, href: "/dynamic-fields" },
     { label: "Scanned Products", icon: BarChart3, href: "/scanned-products" },
+    { label: "PDI Report", icon: Notebook, href: "/pdi-partreport" },
     { label: "Users", icon: Users, href: "/users" },
     { label: "Settings", icon: Settings, href: "/settings" },
 ];

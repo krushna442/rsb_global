@@ -6,6 +6,17 @@ import { User, ApiResponse } from "@/types/api";
 import api from "@/lib/api";
 import { toast } from "sonner";
 
+// ── Mail type constants ──────────────────────────────────────────────────────
+export const MAIL_TYPES = [
+  'shift_scan_report',
+  'day_scan_report',
+  'monthly_scan_report',
+  'monthly_product_report',
+] as const;
+
+export type MailType = typeof MAIL_TYPES[number];
+
+// ── Context type ─────────────────────────────────────────────────────────────
 interface UserContextType {
   user: User | null;
   allUsers: User[];
@@ -20,11 +31,12 @@ interface UserContextType {
   uploadProfileImage: (file: File) => Promise<boolean>;
   deactivateUser: (id: number) => Promise<boolean>;
   deleteUser: (id: number) => Promise<boolean>;
+  addMailTypes: (id: number, mailTypes: MailType[]) => Promise<boolean>;
+  removeMailTypes: (id: number, mailTypes: MailType[]) => Promise<boolean>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-// Routes that don't require authentication
 const PUBLIC_ROUTES = ["/login", "/register"];
 
 export function UserProvider({ children }: { children: ReactNode }) {
@@ -39,7 +51,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const checkAuth = useCallback(async () => {
     try {
       setLoading(true);
-      
       const res = await api.get<ApiResponse<User>>("/users/me");
       if (res.data.success && res.data.data) {
         setUser(res.data.data);
@@ -48,9 +59,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
     } catch (err: any) {
       setUser(null);
-      // We don't want to show a hard error overlay on mount if it's just a 401 unauthenticated or backend error
       if (err.response?.status !== 401 && err.response?.status !== 404) {
-        // Just log a warning so Next.js dev overlay doesn't interrupt the user
         console.warn("Auth check failed or backend unavailable:", err.message);
       }
     } finally {
@@ -69,18 +78,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
+  useEffect(() => { checkAuth(); }, [checkAuth]);
 
-  // Fetch all users once authenticated
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchAllUsers();
-    }
+    if (isAuthenticated) fetchAllUsers();
   }, [isAuthenticated, fetchAllUsers]);
 
-  // Route protection effect
   useEffect(() => {
     if (!loading) {
       const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
@@ -162,19 +165,15 @@ export function UserProvider({ children }: { children: ReactNode }) {
     try {
       const formData = new FormData();
       formData.append("profile_image", file);
-
       const res = await api.post<ApiResponse<User>>("/users/upload-image", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
+        headers: { "Content-Type": "multipart/form-data" },
       });
-
       if (res.data.success) {
         toast.success("Profile picture updated!");
         if (res.data.data) {
           setUser(res.data.data);
         } else {
-          checkAuth(); // Refetch if backend doesn't return full user
+          checkAuth();
         }
         fetchAllUsers();
         return true;
@@ -219,12 +218,58 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // ── Mail type operations ───────────────────────────────────────────────────
+
+  const addMailTypes = async (id: number, mailTypes: MailType[]): Promise<boolean> => {
+    try {
+      const res = await api.patch<ApiResponse<User>>(`/users/${id}/mail-types/add`, { mailTypes });
+      if (res.data.success) {
+        toast.success("Mail types updated successfully");
+        // Keep logged-in user's state in sync if admin edits their own account
+        if (user && user.id === id && res.data.data) {
+          setUser(res.data.data);
+        }
+        fetchAllUsers();
+        return true;
+      }
+      toast.error(res.data.message || "Failed to add mail types");
+      return false;
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "An error occurred");
+      return false;
+    }
+  };
+
+  const removeMailTypes = async (id: number, mailTypes: MailType[]): Promise<boolean> => {
+    try {
+      const res = await api.patch<ApiResponse<User>>(`/users/${id}/mail-types/remove`, { mailTypes });
+      if (res.data.success) {
+        // Empty array = all cleared, otherwise specific removal
+        const message = mailTypes.length === 0
+          ? "All mail types cleared"
+          : "Mail types removed successfully";
+        toast.success(message);
+        if (user && user.id === id && res.data.data) {
+          setUser(res.data.data);
+        }
+        fetchAllUsers();
+        return true;
+      }
+      toast.error(res.data.message || "Failed to remove mail types");
+      return false;
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "An error occurred");
+      return false;
+    }
+  };
+
   return (
-    <UserContext.Provider value={{ 
-      user, allUsers, isAuthenticated, loading, 
-      login, register, logout, checkAuth, 
+    <UserContext.Provider value={{
+      user, allUsers, isAuthenticated, loading,
+      login, register, logout, checkAuth,
       fetchAllUsers, updateProfile, uploadProfileImage,
-      deactivateUser, deleteUser
+      deactivateUser, deleteUser,
+      addMailTypes, removeMailTypes,
     }}>
       {children}
     </UserContext.Provider>

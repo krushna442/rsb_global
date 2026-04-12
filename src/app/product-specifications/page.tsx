@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useProducts } from "@/contexts/ProductsContext";
 import { useUser } from "@/contexts/UserContext";
@@ -13,9 +13,10 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { FileImage, ScanLine, FileText, Eye } from "lucide-react";
-import { QRScanner } from "@/components/qr-scanner";
+import { QRScanner, QRScannerHandle } from "@/components/qr-scanner";
 import { fetchFieldImages, getFieldImageUrl, FieldImageRecord } from "@/lib/fieldImageApi";
 import { Card, CardContent } from "@/components/ui/card";
+import { parseScanText } from "@/app/production-verification/parseScanText.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,9 @@ export default function ProductSpecificationsPage() {
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const [viewDrawingUrl, setViewDrawingUrl] = useState<string | null>(null);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [scannerKey, setScannerKey] = useState(0);
+    const scannerRef = useRef<QRScannerHandle>(null);
+    const isClosingRef = useRef(false);
     const [fieldImageRecords, setFieldImageRecords] = useState<FieldImageRecord[]>([]);
 
     useEffect(() => {
@@ -116,7 +120,7 @@ export default function ProductSpecificationsPage() {
     // ── important fields: set of valueKey names that should blink ────────────
     const importantFieldNames = new Set<string>(dynamicFields?.important_fields ?? []);
 
-    const handleSearch = (searchQuery?: string | any) => {
+    const handleSearch = useCallback((searchQuery?: string | any) => {
         const term = typeof searchQuery === "string" ? searchQuery : searchTerm.trim();
         if (!term.trim()) return;
         const matched = products.find(
@@ -133,17 +137,36 @@ export default function ProductSpecificationsPage() {
         } else {
             setPartInfo(matched);
         }
-    };
+    }, [products, searchTerm]);
 
-    const handleScan = (decodedText: string) => {
-        setIsScannerOpen(false);
-        const revIndex = decodedText.toLowerCase().indexOf("rev");
-        const partNo = revIndex > -1
-            ? decodedText.substring(0, revIndex).trim()
-            : decodedText.split(" ")[0].trim();
+    const handleCloseScanner = useCallback(async () => {
+        if (isClosingRef.current) return;
+        isClosingRef.current = true;
+        try {
+            await scannerRef.current?.forceStop();
+        } finally {
+            setIsScannerOpen(false);
+            isClosingRef.current = false;
+        }
+    }, []);
+
+    const handleScan = useCallback((decodedText: string) => {
+        const parsed = parseScanText(decodedText);
+        let partNo = "";
+
+        if (parsed) {
+            partNo = parsed.partNo;
+        } else {
+            const revIndex = decodedText.toLowerCase().indexOf("rev");
+            partNo = revIndex > -1
+                ? decodedText.substring(0, revIndex).trim()
+                : decodedText.split(" ")[0].trim();
+        }
+
         setSearchTerm(partNo);
         handleSearch(partNo);
-    };
+        handleCloseScanner();
+    }, [handleCloseScanner, handleSearch]);
 
     const handleReset = () => {
         setSearchTerm("");
@@ -238,7 +261,10 @@ export default function ProductSpecificationsPage() {
                     </div>
 
                     <button
-                        onClick={() => setIsScannerOpen(true)}
+                        onClick={() => {
+                            setScannerKey(prev => prev + 1);
+                            setIsScannerOpen(true);
+                        }}
                         style={{
                             height: "44px", padding: "0 22px",
                             background: "#ab47bc", color: "#fff",
@@ -308,7 +334,7 @@ export default function ProductSpecificationsPage() {
 
                 {/* ── SPEC GRID ── */}
                 <div style={{ padding: "12px 14px 24px" }}>
-                    <div className="grid grid-cols-4 gap-4">
+                    <div className="grid grid-cols-4 gap-y-4 gap-x-2">
                         {filteredSpecs.map((spec) => {
                             const val = partInfo?.[spec.valueKey]
                                      ?? partInfo?.specification?.[spec.valueKey];
@@ -323,7 +349,7 @@ export default function ProductSpecificationsPage() {
                                     {/* Label row */}
                                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
                                         <span style={{
-                                            fontSize: "17px",
+                                            fontSize: "16px",
                                             fontWeight: "700",
                                             color: isImportant ? "#b71c1c" : "#111",
                                             paddingLeft: "4px",
@@ -355,11 +381,12 @@ export default function ProductSpecificationsPage() {
                                     {/* Value shell — blinks when important */}
                                     <div style={{
                                         background: isImportant ? "#e53935" : "#ffff33",
-                                        border: isImportant ? "3px solid #e53935" : "2px solid #c8b800",
+                                        border: isImportant ? "3px solid #fdeceb" : "2px solid #c8b800",
                                         borderRadius: "5px",
                                         padding: "10px 16px",
                                         fontSize: "21px",
                                         fontWeight: "900",
+                                        font: "#0d1b8e",
                                         color: "#0d1b8e",
                                         minHeight: "52px",
                                         display: "flex",
@@ -465,29 +492,32 @@ export default function ProductSpecificationsPage() {
 
                 {/* Image dialog */}
                 <Dialog open={!!selectedImage} onOpenChange={(o) => !o && setSelectedImage(null)}>
-                    <DialogContent className="max-w-3xl">
-                        <DialogHeader>
-                            <DialogTitle>Spec Image</DialogTitle>
-                        </DialogHeader>
+                    <DialogContent className="w-3xl bg-slate-300">
+
                         {selectedImage && (
-                            <div className="flex justify-center rounded-md overflow-hidden bg-gray-100 mt-4 max-h-[70vh]">
-                                <img src={selectedImage} alt="Spec Detail" className="object-contain max-h-full" />
+                            <div className="flex justify-center rounded-md overflow-hidden bg-gray-100 mt-4 max-h-[80vh]">
+                                <img src={selectedImage} alt="Spec Detail" className="object-contain w-full" />
                             </div>
                         )}
                     </DialogContent>
                 </Dialog>
 
                 {/* QR Scanner dialog */}
-                <Dialog open={isScannerOpen} onOpenChange={setIsScannerOpen}>
+                <Dialog open={isScannerOpen} onOpenChange={async (o) => { if (!o) await handleCloseScanner(); }}>
                     <DialogContent className="max-w-xl">
                         <DialogHeader>
                             <DialogTitle>Scan Product Label</DialogTitle>
                         </DialogHeader>
                         {isScannerOpen && (
                             <div className="py-4">
-                                <QRScanner onScan={handleScan} />
+                                <QRScanner
+                                    key={scannerKey}
+                                    ref={scannerRef}
+                                    onScan={handleScan}
+                                    onStopped={handleCloseScanner}
+                                />
                                 <p className="text-xs text-center text-muted-foreground mt-4">
-                                    Point camera at the product label QR code.
+                                    Point camera at the product label QR code. The system will automatically capture and search it.
                                 </p>
                             </div>
                         )}

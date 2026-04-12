@@ -9,7 +9,8 @@ export const ALL_ROUTES = [
     "/dynamic-fields",
     "/scanned-products",
     "/users",
-    "/settings"
+    "/settings",
+    "/pdi-partreport"
 ];
 
 export const ROLE_ACCESS: Record<string, string[]> = {
@@ -24,7 +25,9 @@ export const ROLE_ACCESS: Record<string, string[]> = {
         "/dynamic-fields",
         "/scanned-products",
         "/users",
-        "/settings"
+        "/settings",
+            "/pdi-partreport"
+
     ],
     
     "production": [
@@ -35,7 +38,9 @@ export const ROLE_ACCESS: Record<string, string[]> = {
         "/documents",
         "/product-specifications",
         "/scanned-products",
-        "/settings"
+        "/settings",
+            "/pdi-partreport"
+
     ],
     
     "quality": [
@@ -46,7 +51,9 @@ export const ROLE_ACCESS: Record<string, string[]> = {
         "/documents",
         "/product-specifications",
         "/scanned-products",
-        "/settings"
+        "/settings",
+            "/pdi-partreport"
+
     ],
     
     "viewer": [
@@ -55,7 +62,9 @@ export const ROLE_ACCESS: Record<string, string[]> = {
         "/documents",
         "/product-specifications",
         "/scanned-products",
-        "/settings"
+        "/settings",
+            "/pdi-partreport"
+
     ]
 };
 

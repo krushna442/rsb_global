@@ -100,12 +100,7 @@ export interface ScannedProduct {
   updated_at: string;
 }
 
-export interface DailyScanSummary {
-  total: number;
-  pass: number;
-  fail: number;
-  rejected: number;
-}
+export type DailyScanSummary = ScannedProduct[];
 
 export interface User {
   id: number;
@@ -118,9 +113,12 @@ export interface User {
   column_array: string[];
   menu_array: string[];
   document_name_array: string[];
+  mail_types: string[];   // or MailType[] if you import it here
+
   profile_image: string | null;
   is_active: number | boolean;
   created_at?: string;
   updated_at?: string;
   show_image: string;
 }
+

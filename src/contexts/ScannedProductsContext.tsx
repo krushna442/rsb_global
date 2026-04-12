@@ -23,7 +23,7 @@ interface FetchScannedOptions {
 
 interface ScannedProductsContextType {
   scannedProducts: ScannedProduct[];
-  dailySummary: DailyScanSummary | null;
+  dailySummary: ScannedProduct[];
   scanStats: { total: number; pass: number; rejected: number } | null;
   meta: ApiResponse<any>['meta'] | undefined;
   loading: boolean;
@@ -41,11 +41,12 @@ const ScannedProductsContext = createContext<ScannedProductsContextType | undefi
 
 export function ScannedProductsProvider({ children }: { children: ReactNode }) {
   const [scannedProducts, setScannedProducts] = useState<ScannedProduct[]>([]);
-  const [dailySummary, setDailySummary] = useState<DailyScanSummary | null>(null);
+  const [dailySummary, setDailySummary] = useState<ScannedProduct[]>([]);
   const [scanStats, setScanStats] = useState<{ total: number; pass: number; rejected: number } | null>(null);
   const [meta, setMeta] = useState<ApiResponse<any>['meta'] | undefined>(undefined);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [todayScannedProducts, setTodayScannedProducts] = useState<ScannedProduct[]>([]);
 
   const fetchScannedProducts = useCallback(async (options?: FetchScannedOptions) => {
     try {
@@ -85,7 +86,7 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
 
   const fetchDailySummary = async (date: string) => {
     try {
-      const response = await api.get<ApiResponse<DailyScanSummary>>(`/scanned-products?dispatch_date=${date}`);
+      const response = await api.get<ApiResponse<ScannedProduct[]>>(`/scanned-products?dispatch_date=${date}&limit=9999`);
       if (response.data.success && response.data.data) {
         setDailySummary(response.data.data);
       }
@@ -147,7 +148,14 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
         } else {
           toast.error(`Scan FAILED: ${scanResult.remarks}`);
         }
-        await fetchScannedProducts(); // Update history list if needed
+        
+        // Refresh both lists to ensure consistency
+        const today = new Date().toISOString().split("T")[0];
+        await Promise.all([
+            fetchScannedProducts(),
+            fetchDailySummary(today)
+        ]);
+
         return scanResult;
       } else {
         toast.error(response.data.message || "Failed to record scan");
@@ -181,7 +189,11 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
       const response = await api.patch<ApiResponse<ScannedProduct>>(`/scanned-products/${id}/reject`, { is_rejected });
       if (response.data.success) {
         toast.success(`Scan marked as ${is_rejected ? 'rejected' : 'un-rejected'}`);
-        await fetchScannedProducts();
+        const today = new Date().toISOString().split("T")[0];
+        await Promise.all([
+            fetchScannedProducts(),
+            fetchDailySummary(today)
+        ]);
         return true;
       } else {
         toast.error(response.data.message || "Failed to update rejection status");
@@ -193,10 +205,10 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  useEffect(() => {
-    fetchScannedProducts({ today: true });
-    fetchScanStats({ this_month: true });
-  }, [fetchScannedProducts, fetchScanStats]);
+useEffect(() => {
+  fetchScannedProducts({ this_month: true, limit: 9999 });
+  fetchScanStats({ this_month: true });
+}, [fetchScannedProducts, fetchScanStats]);
 
   return (
     <ScannedProductsContext.Provider

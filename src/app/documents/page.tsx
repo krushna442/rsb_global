@@ -444,12 +444,7 @@ function EditDocPopup({
                                 {product.customer}
                             </p>
                         </div>
-                        <button
-                            onClick={onClose}
-                            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground"
-                        >
-                            <X className="w-4 h-4" />
-                        </button>
+
                     </div>
                     <div className="flex-1 overflow-y-auto px-6 py-4">
                         <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
@@ -1026,8 +1021,12 @@ export default function DocumentsPage() {
         url: string;
         category: string;
     } | null>(null);
-    const [editProduct, setEditProduct] = useState<Product | null>(null);
+    const [editProductId, setEditProductId] = useState<number | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
+
+    const editProduct = useMemo(() => 
+        editProductId ? products.find(p => p.id === editProductId) || null : null
+    , [editProductId, products]);
 
     // Extra columns from data
     const { extraIndividual, extraPpap } = useMemo(() => {
@@ -1382,7 +1381,7 @@ export default function DocumentsPage() {
         [deleteDocument]
     );
 
-    if (loading) {
+    if (loading && products.length === 0) {
         return (
             <DashboardLayout>
                 <div className="p-8 text-center text-muted-foreground">Loading...</div>
@@ -1607,7 +1606,7 @@ export default function DocumentsPage() {
                                                 {/* Edit button sticky cell */}
                                                 <TableCell className="text-center sticky left-[160px] z-10 bg-background group-hover:bg-muted/10 transition-colors border-r px-2">
                                                     <button
-                                                        onClick={() => setEditProduct(product)}
+                                                        onClick={() => setEditProductId(product.id)}
                                                         className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-muted/60 hover:bg-primary/10 hover:text-primary text-muted-foreground transition-all"
                                                         title="Edit documents"
                                                     >
@@ -1629,7 +1628,7 @@ export default function DocumentsPage() {
                                                         >
                                                             {notReq ? (
                                                                 <span
-                                                                    className="text-muted-foreground/40 text-xs"
+                                                                    className=" text-gray-600 text-xs"
                                                                     title="Not Required"
                                                                 >
                                                                     N/R
@@ -1854,7 +1853,7 @@ export default function DocumentsPage() {
                 product={editProduct}
                 allIndividualCols={allIndividualCols}
                 allPpapCols={allPpapCols}
-                onClose={() => setEditProduct(null)}
+                onClose={() => setEditProductId(null)}
                 onUpload={uploadDocument}
                 onDelete={deleteDocument}
                 onMarkNotRequired={handleMarkNotRequired}
