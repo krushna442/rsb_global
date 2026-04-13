@@ -61,7 +61,7 @@ const INDIVIDUAL_DOCS = [
     "TRSO",
     "IQA",
     "PO OPY",
-    "DRAWING",
+    "Drawing",
     "INSPECTION REPORT",
     "STICKER",
 ];

@@ -1514,7 +1514,7 @@ export default function PDIPartReportPage() {
   </p>
 
   {/* ── Upload Area — non-admin only ── */}
-  {!isAdmin && (
+  {
     <>
       <input
         type="file"
@@ -1578,7 +1578,7 @@ export default function PDIPartReportPage() {
         )}
       </div>
     </>
-  )}
+  }
 
   {/* ── Admin view: table of all uploaded documents ── */}
   {isAdmin && (

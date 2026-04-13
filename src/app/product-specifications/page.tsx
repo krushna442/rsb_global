@@ -81,6 +81,7 @@ const ALL_SPECS = [
     { id: "Balancing_RPM",            label: "Balancing RPM",                  valueKey: "balancingRpm"                 },
     { id: "Unbalance_CMG",            label: "Unbalance Value CMG",            valueKey: "unbalanceInCmg"               },
     { id: "Unbalance_GM",             label: "Unbalance Value GM",             valueKey: "unbalanceInGram"              },
+    { id:"unbalanceInGram75Percent",   label:"unbalanceInGram75Percent",        valueKey:"unbalanceInGram75Percent"},
     { id: "IA_Bellow",                label: "I/A Bellow Details",             valueKey: "iaBellowDetails"              },
     { id: "Total_Length",             label: "Total Length",                   valueKey: "totalLength"                  },
     { id: "Rear_Slip",                label: "RearSlip",                       valueKey: "slipDetails"                  },

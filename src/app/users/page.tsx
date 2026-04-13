@@ -81,7 +81,7 @@ const allColumns = [
     "SF_Details", "PDC_Length", "Front_End_Piece", "Flange_Yoke",
     "Greaseable_NonGreaseable", "Coupling_Flange", "Coupling_Orientation", 
     "CB_Kit", "Loctite_Grade", "Tightening_Torque", "Balancing_RPM", 
-    "Unbalance_CMG", "Unbalance_GM", "IA_Bellow", "Total_Length", 
+    "Unbalance_CMG", "Unbalance_GM","unbalanceInGram75Percent", "IA_Bellow", "Total_Length", 
     "Rear_Slip", "Mod_No", "Vendor_Code", "Customer_Name", "DWG_Weight"
 ];
 
