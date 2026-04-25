@@ -90,6 +90,7 @@ export interface ScannedProduct {
   plant_location: string;
   vendorCode: string | null;
   is_rejected: number | boolean;
+  is_remarks_edited: number | boolean;
   created_by: string | null;
   modified_by: string | null;
   product_id: number;

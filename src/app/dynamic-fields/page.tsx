@@ -80,6 +80,10 @@ export default function DynamicFieldsPage() {
     const productFields = data?.product_fields || [];
     const importantFields = data?.important_fields || [];
     const documents = data?.documents || [];
+    const individualDocs = documents.filter(d => d.category === "individual");
+const ppapDocs = documents.filter(d => d.category === "ppap");
+
+const allDocs = [...individualDocs, ...ppapDocs];
 
     // --- Handlers for Product Fields ---
     const handleAddField = async () => {
@@ -241,7 +245,7 @@ export default function DynamicFieldsPage() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {documents.map((doc, idx) => (
+                                        {allDocs.map((doc, idx) => (
                                             <TableRow key={`${doc.name}-${idx}`} className="group hover:bg-muted/20 transition-colors">
                                                 <TableCell className="pl-6 py-3 font-medium text-sm">{doc.name}</TableCell>
                                                 <TableCell>

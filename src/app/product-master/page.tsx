@@ -176,7 +176,9 @@ export default function ProductMasterPage() {
 
       // ✅ NEW: No Drawing Filter
       if (statusFilter === "no_drawing") {
-        const drawing = (p as any)?.ppap_documents?.individual?.Drawing;
+const drawing =
+  (p as any)?.ppap_documents?.individual?.Drawing ||
+  (p as any)?.ppap_documents?.individual?.DRAWING;
         const hasDrawing = drawing && drawing.trim() !== "";
 
         if (hasDrawing) return false;
@@ -257,7 +259,7 @@ export default function ProductMasterPage() {
         f.name
           .replace(/([A-Z])/g, " $1")
           .replace(/^./, (str) => str.toUpperCase()),
-      ) || [];
+      )  || [];
 
     const rows = exportProducts.map((product) => {
       const rawGram =
@@ -865,26 +867,68 @@ export default function ProductMasterPage() {
                               const isFirst = idx === 0;
                               const fieldName = field.name;
 
-                              if (fieldName === "status") {
-                                return (
-                                  <TableCell
-                                    key={fieldName}
-                                    className={getCellClass(
-                                      "status",
-                                      "whitespace-nowrap",
-                                    )}
-                                  >
-                                    <Badge
-                                      variant="outline"
-                                      className={`text-[10px] ${statusStyles[((product as any).status || product.status || "Pending").toLowerCase()] || "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                if (fieldName === "status") {
+                                  const status = (
+                                    (product as any).status ||
+                                    product.status ||
+                                    "Pending"
+                                  ).toLowerCase();
+                                  const showPQ = status !== "active";
+
+                                  return (
+                                    <TableCell
+                                      key={fieldName}
+                                      className={getCellClass(
+                                        "status",
+                                        "whitespace-nowrap",
+                                      )}
                                     >
-                                      {(product as any).status ||
-                                        product.status ||
-                                        "Pending"}
-                                    </Badge>
-                                  </TableCell>
-                                );
-                              }
+                                      <div className="flex items-center gap-2">
+                                        <Badge
+                                          variant="outline"
+                                          className={`text-[10px] ${statusStyles[status] || "bg-gray-50 text-gray-700 border-gray-200"}`}
+                                        >
+                                          {status.charAt(0).toUpperCase() +
+                                            status.slice(1)}
+                                        </Badge>
+
+                                        {showPQ && (
+                                          <div className="flex gap-1.5 ml-1">
+                                            <Badge
+                                              variant="default"
+                                              className={`w-4 h-4 flex items-center justify-center p-0 text-[9px] font-bold rounded-full border-0 shadow-none hover:opacity-90 transition-opacity ${
+                                                product.approved === "approved"
+                                                  ? "bg-emerald-500 text-white"
+                                                  : product.approved ===
+                                                      "rejected"
+                                                    ? "bg-red-500 text-white"
+                                                    : "bg-yellow-400 text-black"
+                                              }`}
+                                              title={`Production Approval: ${product.approved || "pending"}`}
+                                            >
+                                              P
+                                            </Badge>
+                                            <Badge
+                                              variant="default"
+                                              className={`w-4 h-4 flex items-center justify-center p-0 text-[9px] font-bold rounded-full border-0 shadow-none hover:opacity-90 transition-opacity ${
+                                                product.quality_verified ===
+                                                "approved"
+                                                  ? "bg-emerald-500 text-white"
+                                                  : product.quality_verified ===
+                                                      "rejected"
+                                                    ? "bg-red-500 text-white"
+                                                    : "bg-yellow-400 text-black"
+                                              }`}
+                                              title={`Quality Verification: ${product.quality_verified || "pending"}`}
+                                            >
+                                              Q
+                                            </Badge>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                  );
+                                }
 
                               if (fieldName === "unbalanceInGram75Percent") {
                                 return (

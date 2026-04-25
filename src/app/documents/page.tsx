@@ -40,8 +40,16 @@ import {
 } from "lucide-react";
 import { useProducts } from "@/contexts/ProductsContext";
 import { useUser } from "@/contexts/UserContext";
+import { useDynamicFields } from "@/contexts/DynamicFieldsContext";
 import { Product } from "@/types/api";
 import ExcelJS from "exceljs";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import {
     fetchFieldDefinitions,
     fetchFieldImages,
@@ -52,33 +60,13 @@ import {
     FieldDefinition,
 } from "@/lib/fieldImageApi";
 import { toast } from "sonner";
+import JSZip from "jszip";
+import { saveAs } from "file-saver";
 // exceljs + file-saver are imported dynamically inside handleDownloadExcel
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const INDIVIDUAL_DOCS = [
-    "PSW",
-    "TRSO",
-    "IQA",
-    "PO OPY",
-    "Drawing",
-    "INSPECTION REPORT",
-    "STICKER",
-];
 
-const PPAP_DOCS = [
-    "DRAWING",
-    "SAMPLE REPORT",
-    "MR REPORT",
-    "SPC",
-    "MSA",
-    "PIST",
-    "PFMEA",
-    "PFD",
-    "CONTROL PLAN",
-    "IQA",
-    "WELDING REPORT",
-];
 
 // Map document_name_array keys → display labels (adjust to match your data)
 const DOC_NAME_LABEL_MAP: Record<string, string> = {
@@ -1009,6 +997,7 @@ function FieldImagesSection({ isAdmin }: { isAdmin: boolean }) {
 export default function DocumentsPage() {
     const { products, loading, uploadDocument, deleteDocument, markDocumentNotRequired } = useProducts();
     const { user } = useUser();
+    const { data: dynamicFieldsData } = useDynamicFields();
 
     const isAdminOrSuper =
         user?.role === "admin" || user?.role === "super admin";
@@ -1016,32 +1005,96 @@ export default function DocumentsPage() {
     const [activeTab, setActiveTab] = useState<"documents" | "field-images">("documents");
 
     const [searchQuery, setSearchQuery] = useState("");
+    const [selectedCustomer, setSelectedCustomer] = useState<string>("all");
     const [viewDoc, setViewDoc] = useState<{
         name: string;
         url: string;
         category: string;
     } | null>(null);
     const [editProductId, setEditProductId] = useState<number | null>(null);
+    const [downloadingZipId, setDownloadingZipId] = useState<number | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
 
     const editProduct = useMemo(() => 
         editProductId ? products.find(p => p.id === editProductId) || null : null
     , [editProductId, products]);
 
-    // Extra columns from data
+    const handleDownloadZip = useCallback(async (product: Product) => {
+        const docs = parseCategorizedDocs(product.ppap_documents);
+        const allDocs: { name: string; url: string }[] = [];
+
+        Object.entries(docs.individual).forEach(([key, val]) => {
+            if (val && val !== NOT_REQUIRED_VALUE) {
+                allDocs.push({ name: `individual_${key}`, url: getFileUrl(val) });
+            }
+        });
+        Object.entries(docs.ppap).forEach(([key, val]) => {
+            if (val && val !== NOT_REQUIRED_VALUE) {
+                allDocs.push({ name: `ppap_${key}`, url: getFileUrl(val) });
+            }
+        });
+
+        if (allDocs.length === 0) {
+            toast.warning("No documents available to download.");
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Download all ${allDocs.length} document(s) for part "${product.part_number}" as a ZIP file?`
+        );
+        if (!confirmed) return;
+
+        setDownloadingZipId(product.id);
+        try {
+            const zip = new JSZip();
+            await Promise.all(
+                allDocs.map(async ({ name, url }) => {
+                    try {
+                        const res = await fetch(url);
+                        if (!res.ok) return;
+                        const blob = await res.blob();
+                        const ext = url.split('.').pop()?.split('?')[0] || 'file';
+                        zip.file(`${name}.${ext}`, blob);
+                    } catch {
+                        // Skip failed documents silently
+                    }
+                })
+            );
+            const content = await zip.generateAsync({ type: "blob" });
+            saveAs(content, `${product.part_number}_documents.zip`);
+            toast.success(`ZIP downloaded for ${product.part_number}`);
+        } catch (err) {
+            toast.error("Failed to create ZIP file.");
+            console.error(err);
+        } finally {
+            setDownloadingZipId(null);
+        }
+    }, []);
+
+    // Get document names from DynamicFieldsContext
+    const contextIndividualDocs = useMemo(() => 
+        dynamicFieldsData?.documents?.filter(d => d.category === "individual").map(d => d.name) || [],
+    [dynamicFieldsData]);
+
+    const contextPpapDocs = useMemo(() => 
+        dynamicFieldsData?.documents?.filter(d => d.category === "ppap").map(d => d.name) || [],
+    [dynamicFieldsData]);
+
+    // Extra columns from data (documents present in product data but not in context)
     const { extraIndividual, extraPpap } = useMemo(() => {
         const indSet = new Set<string>();
         const ppapSet = new Set<string>();
-        const indPredefined = new Set(INDIVIDUAL_DOCS.map((d) => d.toLowerCase()));
-        const ppapPredefined = new Set(PPAP_DOCS.map((d) => d.toLowerCase()));
+        
+        const contextIndSet = new Set(contextIndividualDocs.map(d => d.toLowerCase()));
+        const contextPpapSet = new Set(contextPpapDocs.map(d => d.toLowerCase()));
 
         products.forEach((p) => {
             const docs = parseCategorizedDocs(p.ppap_documents);
             Object.keys(docs.individual).forEach((key) => {
-                if (!indPredefined.has(key.toLowerCase())) indSet.add(key);
+                if (!contextIndSet.has(key.toLowerCase())) indSet.add(key);
             });
             Object.keys(docs.ppap).forEach((key) => {
-                if (!ppapPredefined.has(key.toLowerCase())) ppapSet.add(key);
+                if (!contextPpapSet.has(key.toLowerCase())) ppapSet.add(key);
             });
         });
 
@@ -1049,28 +1102,43 @@ export default function DocumentsPage() {
             extraIndividual: Array.from(indSet).sort(),
             extraPpap: Array.from(ppapSet).sort(),
         };
-    }, [products]);
+    }, [products, contextIndividualDocs, contextPpapDocs]);
 
     const allIndividualCols = useMemo(
-        () => [...INDIVIDUAL_DOCS, ...extraIndividual],
-        [extraIndividual]
+        () => [...contextIndividualDocs, ...extraIndividual],
+        [contextIndividualDocs, extraIndividual]
     );
     const allPpapCols = useMemo(
-        () => [...PPAP_DOCS, ...extraPpap],
-        [extraPpap]
+        () => [...contextPpapDocs, ...extraPpap],
+        [contextPpapDocs, extraPpap]
     );
 
-    const vacancyItems = useVacancySummary(products, allIndividualCols, allPpapCols);
+    // Filtered products logic
+    const uniqueCustomers = useMemo(() => {
+        const customers = products.map(p => p.customer).filter(Boolean);
+        return Array.from(new Set(customers)).sort();
+    }, [products]);
 
     const filteredProducts = useMemo(() => {
-        if (!searchQuery.trim()) return products;
-        const q = searchQuery.toLowerCase();
-        return products.filter(
-            (p) =>
-                (p.part_number || "").toLowerCase().includes(q) ||
-                (p.customer || "").toLowerCase().includes(q)
-        );
-    }, [products, searchQuery]);
+        let result = products;
+
+        if (selectedCustomer !== "all") {
+            result = result.filter(p => p.customer === selectedCustomer);
+        }
+
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            result = result.filter(
+                (p) =>
+                    (p.part_number || "").toLowerCase().includes(q) ||
+                    (p.customer || "").toLowerCase().includes(q)
+            );
+        }
+        return result;
+    }, [products, searchQuery, selectedCustomer]);
+
+    const vacancyItems = useVacancySummary(filteredProducts, allIndividualCols, allPpapCols);
+
 
     const totalPages = Math.max(1, Math.ceil(filteredProducts.length / RECORDS_PER_PAGE));
     const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -1491,17 +1559,38 @@ export default function DocumentsPage() {
                     </Card>
                 </div>
 
-                {/* Search + Download */}
+                {/* Search + Customer Filter + Download */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                    <div className="relative flex-1 max-w-md">
+                    <div className="relative flex-1 max-w-md ">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                         <Input
                             placeholder="Search by part number or customer..."
-                            className="pl-9 h-9 bg-muted/30 border-transparent focus:border-primary/30 text-sm"
+                            className="pl-9 h-9 bg-gray-200 border-transparent focus:border-primary/30 text-sm"
                             value={searchQuery}
                             onChange={(e) => handleSearchChange(e.target.value)}
                         />
                     </div>
+
+                    <Select
+                        value={selectedCustomer}
+                        onValueChange={(val) => {
+                            setSelectedCustomer(val || "all");
+                            setCurrentPage(1);
+                        }}
+                    >
+                        <SelectTrigger className="w-[200px] h-9 bg-muted/30 border-transparent focus:border-primary/30 text-sm">
+                            <SelectValue placeholder="Filter by Customer" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Customers</SelectItem>
+                            {uniqueCustomers.map((c) => (
+                                <SelectItem key={c} value={c}>
+                                    {c}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
                     <Button
                         variant="outline"
                         size="sm"
@@ -1603,8 +1692,9 @@ export default function DocumentsPage() {
                                                         </p>
                                                     </div>
                                                 </TableCell>
-                                                {/* Edit button sticky cell */}
+                                                {/* Edit + Download buttons sticky cell */}
                                                 <TableCell className="text-center sticky left-[160px] z-10 bg-background group-hover:bg-muted/10 transition-colors border-r px-2">
+                                                    <div className="flex items-center justify-center gap-1">
                                                     <button
                                                         onClick={() => setEditProductId(product.id)}
                                                         className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-muted/60 hover:bg-primary/10 hover:text-primary text-muted-foreground transition-all"
@@ -1612,6 +1702,17 @@ export default function DocumentsPage() {
                                                     >
                                                         <Pencil className="w-3.5 h-3.5" />
                                                     </button>
+                                                    <button
+                                                        onClick={() => handleDownloadZip(product)}
+                                                        disabled={downloadingZipId === product.id}
+                                                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-muted/60 hover:bg-emerald-100 hover:text-emerald-700 text-muted-foreground transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        title="Download all documents as ZIP"
+                                                    >
+                                                        {downloadingZipId === product.id
+                                                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                            : <Download className="w-3.5 h-3.5" />}
+                                                    </button>
+                                                    </div>
                                                 </TableCell>
                                                 {/* Individual doc cells */}
                                                 {allIndividualCols.map((doc, i) => {

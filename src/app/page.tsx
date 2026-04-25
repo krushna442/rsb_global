@@ -33,6 +33,7 @@ import {
 } from "recharts";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useScannedProducts } from "@/contexts/ScannedProductsContext";
+import { useProducts } from "@/contexts/ProductsContext";
 
 const statusColors: Record<string, string> = {
   pass: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -44,8 +45,9 @@ const statusColors: Record<string, string> = {
 export default function DashboardPage() {
   const { counts, loading: countsLoading } = useDashboard();
   const { scannedProducts, scanStats, loading: scansLoading } = useScannedProducts();
+  const { products, loading: productsLoading } = useProducts();
 
-  const loading = countsLoading || scansLoading;
+  const loading = countsLoading || scansLoading || productsLoading;
 
   // Formatting date natively
   const lastUpdated = useMemo(() => {
@@ -74,7 +76,7 @@ export default function DashboardPage() {
     },
     {
       title: "Verified Products",
-      value: (counts?.qv_approved ?? 0).toLocaleString(),
+      value: (counts?.approved ?? 0).toLocaleString(),
       change: "+0%",
       trend: "up",
       icon: CheckCircle2,
@@ -91,7 +93,7 @@ export default function DashboardPage() {
       textColor: "text-red-600",
     },
     {
-      title: "Production Checks Today",
+      title: "Production Checks This Month",
       value: (scannedProducts?.length ?? 0).toLocaleString(),
       change: "+0%",
       trend: "up",
@@ -113,40 +115,85 @@ export default function DashboardPage() {
     ];
   }, [counts]);
 
-  // 3. Daily Verification Logs (Hourly Trend)
+  // 3. Live Check Activity (24h starting 6 AM)
   const hourlyLogs = useMemo(() => {
-    const buckets: Record<string, number> = {
-      "6AM": 0, "8AM": 0, "10AM": 0, "12PM": 0, "2PM": 0, "4PM": 0, "6PM": 0, "8PM": 0
-    };
+    const hours = [
+      "6 AM", "7 AM", "8 AM", "9 AM", "10 AM", "11 AM", "12 PM", "1 PM",
+      "2 PM", "3 PM", "4 PM", "5 PM", "6 PM", "7 PM", "8 PM", "9 PM",
+      "10 PM", "11 PM", "12 AM", "1 AM", "2 AM", "3 AM", "4 AM", "5 AM"
+    ];
+    const buckets = hours.map(h => ({ time: h, scans: 0 }));
     
-    scannedProducts?.forEach(scan => {
-      const date = new Date(scan.created_at);
-      const hour = date.getHours();
-      if (hour < 8) buckets["6AM"]++;
-      else if (hour < 10) buckets["8AM"]++;
-      else if (hour < 12) buckets["10AM"]++;
-      else if (hour < 14) buckets["12PM"]++;
-      else if (hour < 16) buckets["2PM"]++;
-      else if (hour < 18) buckets["4PM"]++;
-      else if (hour < 20) buckets["6PM"]++;
-      else buckets["8PM"]++;
-    });
+const now = new Date();
+const start = new Date();
+start.setHours(6, 0, 0, 0);
 
-    return Object.entries(buckets).map(([time, checks]) => ({ time, checks }));
+if (now.getHours() < 6) {
+  start.setDate(start.getDate() - 1);
+}
+
+const end = new Date(start);
+end.setDate(end.getDate() + 1);
+
+scannedProducts?.forEach(scan => {
+const raw = scan.created_at;
+
+// Remove UTC interpretation
+const date = new Date(raw.replace("Z", ""));
+
+  if (date >= start && date < end) {
+    const hour = date.getHours();
+
+    let index = hour - 6;
+    if (index < 0) index += 24;
+
+    if (index >= 0 && index < 24) {
+      buckets[index].scans++;
+    }
+  }
+});
+
+
+    return buckets;
   }, [scannedProducts]);
 
-  // 4. Production Errors
-  const weeklyErrors = useMemo(() => {
-    return [
-      { day: "Mon", errors: 0 },
-      { day: "Tue", errors: 0 },
-      { day: "Wed", errors: 0 },
-      { day: "Thu", errors: 0 },
-      { day: "Fri", errors: 0 },
-      { day: "Sat", errors: 0 },
-      { day: "Today", errors: scanStats?.rejected || 0 },
+  // 4. Weekly Scanning Performance
+  const weeklyPerformance = useMemo(() => {
+    const orderedWeekData = [
+      { day: "Mon", pass: 0, fail: 0 },
+      { day: "Tue", pass: 0, fail: 0 },
+      { day: "Wed", pass: 0, fail: 0 },
+      { day: "Thu", pass: 0, fail: 0 },
+      { day: "Fri", pass: 0, fail: 0 },
+      { day: "Sat", pass: 0, fail: 0 },
+      { day: "Sun", pass: 0, fail: 0 },
     ];
-  }, [scanStats]);
+    const daysMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const now = new Date();
+const firstDayOfWeek = new Date(now);
+firstDayOfWeek.setDate(now.getDate() - now.getDay() + 1); // Monday
+firstDayOfWeek.setHours(0,0,0,0);
+
+const lastDayOfWeek = new Date(firstDayOfWeek);
+lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 7);
+
+scannedProducts?.forEach(scan => {
+  const date = new Date(scan.created_at);
+
+  if (date >= firstDayOfWeek && date < lastDayOfWeek) {
+    const dayName = daysMap[date.getDay()];
+    const target = orderedWeekData.find(d => d.day === dayName);
+
+    if (target) {
+      if (scan.validation_status === 'pass') target.pass++;
+      else if (scan.validation_status === 'fail') target.fail++;
+    }
+  }
+});
+
+
+    return orderedWeekData;
+  }, [scannedProducts]);
 
   // 5. Monthly Trend
   const verificationTrend = useMemo(() => {
@@ -157,6 +204,88 @@ export default function DashboardPage() {
       { month: currentMonth, verified: scanStats?.pass || 0, pending: scanStats?.total ? scanStats.total - scanStats.pass - scanStats.rejected : 0, rejected: scanStats?.rejected || 0 },
     ];
   }, [scanStats]);
+
+  // NEW: Row 1 - Approval Status Data
+  const productionApprovalData = useMemo(() => {
+    if (!products) return [];
+    const map = { Approved: 0, Pending: 0, Rejected: 0 };
+    products.forEach(p => {
+      if (p.approved === "approved") map.Approved++;
+      else if (p.approved === "rejected") map.Rejected++;
+      else map.Pending++;
+    });
+    return [
+      { name: "Approved", value: map.Approved, color: "#10b981" },
+      { name: "Pending", value: map.Pending, color: "#f59e0b" },
+      { name: "Rejected", value: map.Rejected, color: "#ef4444" },
+    ].filter(d => d.value > 0);
+  }, [products]);
+
+  const qualityApprovalData = useMemo(() => {
+    if (!products) return [];
+    const map = { Approved: 0, Pending: 0, Rejected: 0 };
+    products.forEach(p => {
+      if (p.quality_verified === "approved") map.Approved++;
+      else if (p.quality_verified === "rejected") map.Rejected++;
+      else map.Pending++;
+    });
+    return [
+      { name: "Approved", value: map.Approved, color: "#10b981" },
+      { name: "Pending", value: map.Pending, color: "#f59e0b" },
+      { name: "Rejected", value: map.Rejected, color: "#ef4444" },
+    ].filter(d => d.value > 0);
+  }, [products]);
+
+  const totalProductData = useMemo(() => {
+    if (!products) return [];
+    const map = { Active: 0, Draft: 0, Inactive: 0 };
+    products.forEach(p => {
+      if (p.status === "active") map.Active++;
+      else if (p.status === "inactive") map.Inactive++;
+      else map.Draft++;
+    });
+    return [
+      { name: "Active (Approved)", value: map.Active, color: "#3b82f6" },
+      { name: "Draft (Pending)", value: map.Draft, color: "#8b5cf6" },
+      { name: "Inactive", value: map.Inactive, color: "#94a3b8" },
+    ].filter(d => d.value > 0);
+  }, [products]);
+
+  // NEW: Row 2 - Grouping of Products Data
+  const customerGroupData = useMemo(() => {
+    if (!products) return [];
+    const map: Record<string, number> = {};
+    products.forEach(p => {
+      const customerStr = p.customer || "Unknown";
+      const customers = customerStr.split(',').map(c => c.trim()).filter(Boolean);
+      customers.forEach(c => {
+        map[c] = (map[c] || 0) + 1;
+      });
+    });
+    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a,b)=>b.value - a.value).slice(0, 6);
+  }, [products]);
+
+  const partTypeGroupData = useMemo(() => {
+    if (!products) return [];
+    const map: Record<string, number> = {};
+    products.forEach(p => {
+      const t = p.specification?.product_type || p.specification?.productType || p.specification?.partType || "Unknown";
+      map[t] = (map[t] || 0) + 1;
+    });
+    const colors = ["#6366f1","#8b5cf6","#a78bfa","#c084fc","#e879f9","#f472b6","#fb7185"];
+    return Object.entries(map).map(([name, value], i) => ({ name, value, color: colors[i % colors.length] })).sort((a,b)=>b.value - a.value).slice(0, 6);
+  }, [products]);
+
+  const seriesGroupData = useMemo(() => {
+    if (!products) return [];
+    const map: Record<string, number> = {};
+    products.forEach(p => {
+      const s = p.specification?.series || "Unknown";
+      map[s] = (map[s] || 0) + 1;
+    });
+    const colors = ["#3b82f6","#10b981","#f59e0b","#ef4444","#ec4899","#06b6d4"];
+    return Object.entries(map).map(([name, value], i) => ({ name, value, color: colors[i % colors.length] })).sort((a,b)=>b.value - a.value).slice(0, 6);
+  }, [products]);
 
   if (loading && !counts) {
     return (
@@ -224,7 +353,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-sm font-semibold">Verification Trend</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">Performance comparison</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Scanning Performance comparison </p>
                 </div>
                 <Badge variant="secondary" className="text-[10px] font-bold gap-1 bg-emerald-50 text-emerald-700 border-emerald-100">
                   <TrendingUp className="w-3 h-3" />
@@ -302,18 +431,19 @@ export default function DashboardPage() {
           <Card className="border-0 shadow-sm overflow-hidden">
             <CardHeader className="pb-2">
               <div>
-                <CardTitle className="text-sm font-semibold">Production Errors</CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">Weekly rejection count</p>
+                <CardTitle className="text-sm font-semibold">Weekly Scanning Performance</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">Pass and fail scans by day</p>
               </div>
             </CardHeader>
             <CardContent className="pt-2">
               <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={weeklyErrors}>
+                <BarChart data={weeklyPerformance}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                   <XAxis dataKey="day" tick={{ fontSize: 11, fontWeight: 500 }} tickLine={false} axisLine={false} dy={10} />
                   <YAxis tick={{ fontSize: 11, fontWeight: 500 }} tickLine={false} axisLine={false} />
                   <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
-                  <Bar dataKey="errors" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={40} />
+                  <Bar dataKey="pass" name="Pass" fill="#10b981" radius={[0, 0, 0, 0]} barSize={20} />
+                  <Bar dataKey="fail" name="Fail" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -323,8 +453,8 @@ export default function DashboardPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-sm font-semibold">Daily Check Activity</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">Hourly scan distribution</p>
+                  <CardTitle className="text-sm font-semibold">Live Check Activity</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">Scans from 6 AM today to 6 AM tomorrow</p>
                 </div>
                 <Badge variant="outline" className="text-[10px] font-bold border-emerald-200 text-emerald-700 bg-emerald-50">
                   LIVE TRACKING
@@ -335,16 +465,17 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={hourlyLogs}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                  <XAxis dataKey="time" tick={{ fontSize: 11, fontWeight: 500 }} tickLine={false} axisLine={false} dy={10} />
+                  <XAxis dataKey="time" tick={{ fontSize: 10, fontWeight: 500 }} tickLine={false} axisLine={false} dy={10} interval={2} />
                   <YAxis tick={{ fontSize: 11, fontWeight: 500 }} tickLine={false} axisLine={false} />
                   <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
                   <Line 
                     type="monotone" 
-                    dataKey="checks" 
+                    dataKey="scans" 
+                    name="Scans"
                     stroke="#0d9488" 
-                    strokeWidth={4} 
-                    dot={{ fill: "#0d9488", r: 4, strokeWidth: 2, stroke: "#fff" }} 
-                    activeDot={{ r: 6, strokeWidth: 0 }} 
+                    strokeWidth={3} 
+                    dot={{ fill: "#0d9488", r: 3, strokeWidth: 1, stroke: "#fff" }} 
+                    activeDot={{ r: 5, strokeWidth: 0 }} 
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -352,62 +483,150 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* Recent Activity */}
-        <Card className="border-0 shadow-sm overflow-hidden">
-          <CardHeader className="pb-3 border-b border-border/30">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-sm font-semibold">Recent Scan Activity</CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">Latest logs from production lines</p>
-              </div>
-              <Badge variant="outline" className="text-xs font-bold bg-muted/50 cursor-pointer hover:bg-accent transition-colors">
-                View All Scans
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-border/30">
-              {(scannedProducts?.length ?? 0) === 0 ? (
-                <div className="py-12 flex flex-col items-center justify-center text-muted-foreground">
-                  <ClipboardCheck className="w-8 h-8 mb-2 opacity-20" />
-                  <p className="text-sm">No scans recorded today</p>
-                </div>
+        {/* Row 1: Approval Status Diagrams */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Production Approval */}
+          <Card className="border-0 shadow-sm overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Production Status</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Approved vs Rejected (Production)</p>
+            </CardHeader>
+            <CardContent className="pt-2 flex justify-center h-[260px]">
+              {productionApprovalData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={productionApprovalData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={4} dataKey="value" label={({ name, percent }) => `${name || ''} ${((percent || 0) * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>
+                      {productionApprovalData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
+                  </PieChart>
+                </ResponsiveContainer>
               ) : (
-                (scannedProducts || []).slice(0, 10).map((activity) => (
-                  <div key={activity.id} className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors group">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-xl bg-muted/50 flex items-center justify-center group-hover:bg-background transition-colors border border-border/50">
-                        <Package className="w-5 h-5 text-muted-foreground" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{activity.part_no}</p>
-                        <p className="text-[11px] text-muted-foreground font-medium">
-                          {activity.customer_name} • <span className="text-foreground/70">{activity.shift} Shift</span>
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <div className="hidden sm:flex flex-col items-end">
-                        <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-1">Status</span>
-                        <Badge variant="outline" className={`text-[10px] px-2 py-0 h-5 font-bold uppercase ${statusColors[activity.validation_status] || statusColors.info}`}>
-                          {activity.validation_status}
-                        </Badge>
-                      </div>
-                      <div className="text-end min-w-[80px]">
-                        <p className="text-xs font-bold text-foreground">
-                          {new Date(activity.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {new Date(activity.created_at).toLocaleDateString('en-IN', { month: 'short', day: '2-digit' })}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))
+                <div className="flex items-center justify-center text-xs text-muted-foreground">No Data</div>
               )}
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          {/* Quality Approval */}
+          <Card className="border-0 shadow-sm overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Quality Status</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Approved vs Rejected (Quality)</p>
+            </CardHeader>
+            <CardContent className="pt-2 flex justify-center h-[260px]">
+              {qualityApprovalData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={qualityApprovalData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={4} dataKey="value" label={({ name, percent }) => `${name || ''} ${((percent || 0) * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>
+                      {qualityApprovalData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center text-xs text-muted-foreground">No Data</div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Total Product Status */}
+          <Card className="border-0 shadow-sm overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Total Product Status</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Overall master status</p>
+            </CardHeader>
+            <CardContent className="pt-2 flex justify-center h-[260px]">
+              {totalProductData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={totalProductData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={4} dataKey="value" label={({ name, percent }) => `${(name || '').split(' ')[0]} ${((percent || 0) * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>
+                      {totalProductData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center text-xs text-muted-foreground">No Data</div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Row 2: Grouping of Products */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Customer Wise */}
+          <Card className="border-0 shadow-sm overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Customer Distribution</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Products grouped by customer</p>
+            </CardHeader>
+            <CardContent className="pt-2 h-[260px]">
+              {customerGroupData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={customerGroupData} layout="vertical" margin={{ top: 0, right: 20, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                    <XAxis type="number" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 10, fill: "#334155" }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} cursor={{ fill: "#f8fafc" }} />
+                    <Bar dataKey="value" name="Products" fill="#3b82f6" radius={[0, 4, 4, 0]} animationDuration={1000} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No Data</div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Part Type Wise */}
+          <Card className="border-0 shadow-sm overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Part Type Breakdown</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Front, Rear, IA, Integrated, etc.</p>
+            </CardHeader>
+            <CardContent className="pt-2 h-[260px]">
+              {partTypeGroupData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={partTypeGroupData} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#334155" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} cursor={{ fill: "#f8fafc" }} />
+                    <Bar dataKey="value" name="Products" radius={[4, 4, 0, 0]} animationDuration={1000}>
+                      {partTypeGroupData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No Data</div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Series Wise */}
+          <Card className="border-0 shadow-sm overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Series Distribution</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Products grouped by series</p>
+            </CardHeader>
+            <CardContent className="pt-2 h-[260px]">
+              {seriesGroupData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={seriesGroupData} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#334155" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} cursor={{ fill: "#f8fafc" }} />
+                    <Bar dataKey="value" name="Products" radius={[4, 4, 0, 0]} animationDuration={1000}>
+                      {seriesGroupData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No Data</div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </DashboardLayout>
   );

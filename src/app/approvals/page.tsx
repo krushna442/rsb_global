@@ -126,7 +126,7 @@ const allFields = [
   { key: "balancingRpm", label: formatLabel("balancingRpm") },
   { key: "unbalanceInCmg", label: formatLabel("unbalanceInCmg") },
   { key: "unbalanceInGram", label: formatLabel("unbalanceInGram") },
-  { key: "unbalanceInGram75Percent", label: formatLabel("unbalanceInGram75Percent") }
+  { key: "unbalanceInGram75Percent", label: formatLabel("unbalanceInGram75%") }
 ];
 
     const getStatus = useCallback((status?: string) => {
@@ -294,14 +294,26 @@ const allFields = [
                     <DialogHeader>
                         <DialogTitle className="text-lg font-semibold">Product Details for Production Approval</DialogTitle>
                         <p className="text-sm text-muted-foreground mt-1">
-                            Click each field to mark it as reviewed. All fields must be reviewed before approving.
+                            {selectedProduct && Array.isArray(selectedProduct.edited_fields) && selectedProduct.edited_fields.length > 0
+                                ? "Click the highlighted edited fields to mark them as reviewed. All edited fields must be reviewed before approving."
+                                : "Click each field to mark it as reviewed. All fields must be reviewed before approving."}
                         </p>
                     </DialogHeader>
 
                     {selectedProduct && (() => {
-                        const allReviewed = allFields.length === 0 || reviewedFields.size === allFields.length;
-                        const reviewedCount = reviewedFields.size;
-                        const totalCount = allFields.length;
+                        const editedFields = Array.isArray(selectedProduct.edited_fields) ? selectedProduct.edited_fields : [];
+                        const hasEditedFields = editedFields.length > 0;
+                        
+                        const fieldsToReview = hasEditedFields
+                            ? allFields.filter(f => {
+                                const checkKey = f.key === 'partNumber' ? 'part_number' : f.key;
+                                return editedFields.includes(f.key) || editedFields.includes(checkKey);
+                            })
+                            : allFields;
+
+                        const totalCount = fieldsToReview.length;
+                        const reviewedCount = fieldsToReview.filter(f => reviewedFields.has(f.key)).length;
+                        const allReviewed = totalCount === 0 || reviewedCount === totalCount;
                         const currentStatus = getStatus(selectedProduct.approved);
 
                         return (
@@ -335,7 +347,7 @@ const allFields = [
                                                 variant="outline"
                                                 size="sm"
                                                 className="border-purple-300 text-purple-700 hover:bg-purple-100 hover:text-purple-800 gap-1.5"
-                                                onClick={() => window.open(drawingUrl, '_blank')}
+                                                onClick={() => window.open(`${drawingUrl}#toolbar=0`, '_blank')}
                                             >
                                                 <FileImage className="w-3.5 h-3.5" />
                                                 View Drawing
@@ -353,6 +365,9 @@ const allFields = [
                                             customer: 'customer',
                                         };
                                         const checkKey = topLevelMap[key] || key;
+                                        
+                                        const isEdited = hasEditedFields && (editedFields.includes(key) || editedFields.includes(checkKey));
+                                        
                                         let value = (selectedProduct as any)[checkKey];
                                         if (value === undefined) {
                                             value = selectedProduct?.specification?.[key];
@@ -365,16 +380,24 @@ const allFields = [
                                                 className={`relative cursor-pointer rounded-lg border-2 p-3 transition-all duration-100 select-none
                                                     ${isReviewed
                                                         ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
-                                                        : "border-border bg-card hover:border-muted-foreground/40 hover:bg-muted/40"
+                                                        : isEdited
+                                                            ? "border-amber-500 bg-amber-50 dark:bg-amber-950/30"
+                                                            : "border-border bg-card hover:border-muted-foreground/40 hover:bg-muted/40"
                                                     }`}
                                             >
+                                                {/* Edited Badge */}
+                                                {isEdited && !isReviewed && (
+                                                    <span className="absolute top-2 left-2 text-[10px] font-bold text-amber-600 bg-amber-100 dark:bg-amber-900/50 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                                                        EDITED
+                                                    </span>
+                                                )}
                                                 {/* Checkmark badge */}
                                                 {isReviewed && (
                                                     <span className="absolute top-2 right-2 text-emerald-600">
                                                         <CheckCircle2 className="w-4 h-4" />
                                                     </span>
                                                 )}
-                                                <span className="text-muted-foreground block text-xs mb-1 pr-5">{label}</span>
+                                                <span className={`text-muted-foreground block text-xs mb-1 ${isEdited && !isReviewed ? 'mt-4' : ''} pr-5`}>{label}</span>
                                                 <span className={`font-bold text-sm break-words ${isReviewed ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
                                                     {value || "-"}
                                                 </span>
@@ -408,23 +431,24 @@ const allFields = [
                                     <Button variant="outline" onClick={handleCloseDialog}>
                                         Cancel
                                     </Button>
-                                    {currentStatus !== "approved" && (
-                                        <Button
-                                            className="bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                                            disabled={!allReviewed}
-                                            onClick={() => handleAction(selectedProduct, "Approved")}
-                                        >
-                                            <CheckCircle2 className="w-4 h-4 mr-2" /> Approve
-                                        </Button>
-                                    )}
-                                    {currentStatus !== "rejected" && (
-                                        <Button
-                                            variant="destructive"
-                                            onClick={() => handleAction(selectedProduct, "Rejected")}
-                                        >
-                                            <XCircle className="w-4 h-4 mr-2" /> Reject
-                                        </Button>
-                                    )}
+{currentStatus !== "approved" && currentStatus !== "rejected" && (
+    <>
+        <Button
+            className="bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!allReviewed}
+            onClick={() => handleAction(selectedProduct, "Approved")}
+        >
+            <CheckCircle2 className="w-4 h-4 mr-2" /> Approve
+        </Button>
+
+        <Button
+            variant="destructive"
+            onClick={() => handleAction(selectedProduct, "Rejected")}
+        >
+            <XCircle className="w-4 h-4 mr-2" /> Reject
+        </Button>
+    </>
+)}
                                 </DialogFooter>
                             </div>
                         );

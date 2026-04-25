@@ -30,6 +30,7 @@ const PAGE_SIZE = 20;
 export default function ProductionVerificationPage() {
     const { products, loading: productsLoading, dropdownOptions } = useProducts();
     const { scannedProducts,dailySummary,fetchDailySummary, recordScan, loading: scanLoading, fetchScannedProducts } = useScannedProducts();
+const scannedInputRef = useRef<HTMLInputElement>(null);
 
     // ── Fetch ALL records once on mount (no pagination params) ───────────────
     useEffect(() => {
@@ -75,6 +76,26 @@ fetchDailySummary(today);    // fetchScannedProducts is stable (useCallback), ru
         }
     }, []);
 
+const formatDateTime = (dateString?: string, onlyDate = false) => {
+    if (!dateString) return "-";
+    const cleanDate = dateString.endsWith("Z") ? dateString.slice(0, -1) : dateString;
+    const d = new Date(cleanDate);
+    if (isNaN(d.getTime())) return dateString;
+
+    const day = String(d.getDate()).padStart(2, "0");
+    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const month = monthNames[d.getMonth()];
+    const year = d.getFullYear();
+
+    if (onlyDate) return `${day} ${month} ${year}`;
+
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const ampm = hours >= 12 ? "PM" : "AM";
+    hours = hours % 12 || 12;
+    return `${day} ${month} ${year}, ${String(hours).padStart(2, "0")}:${minutes} ${ampm}`;
+};
+
     // ── Form ──────────────────────────────────────────────────────────────────
     const [plant, setPlant]                         = useState("Lucknow-RSB LKW");
     const [partSlNo, setPartSlNo]                   = useState("");
@@ -102,6 +123,11 @@ fetchDailySummary(today);    // fetchScannedProducts is stable (useCallback), ru
         setScannedSpec({});
         setScannedUserValues({});
     }, []);
+    const handleClearlabeltext = useCallback(() => {
+        setScannedLabel("");
+        setPartSlNo("");
+        setExtractedPartNo("");
+    }, []);
 
     const dedupe = (arr: string[] | undefined) => arr?.length ? Array.from(new Set(arr)) : undefined;
 
@@ -114,6 +140,11 @@ fetchDailySummary(today);    // fetchScannedProducts is stable (useCallback), ru
     const activeFlangeYokeOptions        = dedupe(dropdownOptions?.FLANGE_YOKE_OPTIONS)        ?? FLANGE_YOKE_OPTIONS;
 
     const isFlangeDisabled = formProductType !== "FRONT" && formProductType !== "MIDDLE" && formProductType !== "INTEGRATED";
+const focusScanInput = useCallback(() => {
+    setTimeout(() => {
+        scannedInputRef.current?.focus();
+    }, 50); // small delay ensures DOM is ready
+}, []);
 
     // ── Core scan handler ─────────────────────────────────────────────────────
     const handleScan = useCallback(async (decodedText: string) => {
@@ -225,7 +256,10 @@ fetchDailySummary(today);    // fetchScannedProducts is stable (useCallback), ru
                 });
             }
             setMismatchedFields(mismatches);
+            handleClearlabeltext();
         }
+        focusScanInput();
+
 
         // After a new scan is recorded, jump back to page 1 so the user sees it immediately
         setCurrentPage(1);
@@ -268,6 +302,7 @@ fetchDailySummary(today);    // fetchScannedProducts is stable (useCallback), ru
                                 <Label className="w-24 shrink-0">Scanned Label</Label>
                                 <div className="relative flex-1">
                                     <Input
+                                        ref={scannedInputRef}
                                         value={scannedLabel}
                                         onChange={e => setScannedLabel(e.target.value)}
                                         onKeyDown={e => { if (e.key === "Enter") handleScan(scannedLabel); }}
@@ -431,7 +466,7 @@ fetchDailySummary(today);    // fetchScannedProducts is stable (useCallback), ru
                                 ) : (
                                     pagedRecords?.map((record) => (
                                         <tr key={record.id} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
-                                            <td className="px-4 py-2">{new Date(record.dispatch_date).toLocaleDateString()}</td>
+                                            <td className="px-4 py-2">{formatDateTime(record.created_at)}</td>
                                             <td className="px-4 py-2">{record.shift}</td>
                                             <td className="px-4 py-2">{record.part_no}</td>
                                             <td className="px-4 py-2">{record.customer_name}</td>

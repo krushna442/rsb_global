@@ -183,8 +183,10 @@ export default function SettingsPage() {
                     </div>
 
                     {/* Right Column - Forms */}
+                    {/* disable the profile information update form for non admin users */}
                     <div className="space-y-6">
                         {/* Profile Settings Form */}
+                    {user.role === "admin" || user.role === "super admin" && (
                         <Card className="border-0 shadow-sm">
                             <CardHeader className="pb-4">
                                 <div className="flex items-center gap-2">
@@ -197,6 +199,7 @@ export default function SettingsPage() {
                                     </div>
                                 </div>
                             </CardHeader>
+
                             <CardContent className="space-y-4">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                     <div className="space-y-1.5">
@@ -224,6 +227,7 @@ export default function SettingsPage() {
                                 </div>
                             </CardContent>
                         </Card>
+                    )}
 
                         {/* Security & Password Form */}
                         <Card className="border-0 shadow-sm">

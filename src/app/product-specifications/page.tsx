@@ -81,7 +81,7 @@ const ALL_SPECS = [
     { id: "Balancing_RPM",            label: "Balancing RPM",                  valueKey: "balancingRpm"                 },
     { id: "Unbalance_CMG",            label: "Unbalance Value CMG",            valueKey: "unbalanceInCmg"               },
     { id: "Unbalance_GM",             label: "Unbalance Value GM",             valueKey: "unbalanceInGram"              },
-    { id:"unbalanceInGram75Percent",   label:"unbalanceInGram75Percent",        valueKey:"unbalanceInGram75Percent"},
+    { id:"unbalanceInGram75Percent",   label:"unbalanceInGram75%",        valueKey:"unbalanceInGram75Percent"},
     { id: "IA_Bellow",                label: "I/A Bellow Details",             valueKey: "iaBellowDetails"              },
     { id: "Total_Length",             label: "Total Length",                   valueKey: "totalLength"                  },
     { id: "Rear_Slip",                label: "RearSlip",                       valueKey: "slipDetails"                  },
@@ -132,8 +132,24 @@ export default function ProductSpecificationsPage() {
             toast.error("Product not found");
             return;
         }
-        if (matched.status?.toLowerCase() === "pending") {
-            toast.warning("The product is not verified yet");
+        if (matched.status?.toLowerCase() !== "active") {
+            const prodStatus = (matched as any).approved || 'pending';
+            const qualStatus = (matched as any).quality_verified || 'pending';
+
+            if (prodStatus === 'rejected') {
+                toast.error("Product is rejected by Production");
+            } else if (qualStatus === 'rejected') {
+                toast.error("Product is rejected by Quality");
+            } else if (prodStatus === 'pending' && qualStatus === 'pending') {
+                toast.warning("Product is not verified by Production and Quality");
+            } else if (prodStatus === 'pending') {
+                toast.warning("Product is not approved by Production");
+            } else if (qualStatus === 'pending') {
+                toast.warning("Product is not verified by Quality");
+            } else {
+                toast.warning(`Product status: ${matched.status || 'Pending'}`);
+            }
+
             setPartInfo(null);
         } else {
             setPartInfo(matched);
@@ -152,16 +168,20 @@ export default function ProductSpecificationsPage() {
     }, []);
 
     const handleScan = useCallback((decodedText: string) => {
+        console.log("DEBUG: Decoded Scan Text:", decodedText);
         const parsed = parseScanText(decodedText);
+        console.log("DEBUG: Parsed Result:", parsed);
         let partNo = "";
 
         if (parsed) {
             partNo = parsed.partNo;
+            console.log("DEBUG: Extracted PartNo (from parsed):", partNo);
         } else {
             const revIndex = decodedText.toLowerCase().indexOf("rev");
             partNo = revIndex > -1
                 ? decodedText.substring(0, revIndex).trim()
                 : decodedText.split(" ")[0].trim();
+            console.log("DEBUG: Extracted PartNo (fallback):", partNo);
         }
 
         setSearchTerm(partNo);
@@ -448,7 +468,7 @@ export default function ProductSpecificationsPage() {
                                             Reference  Images
                                         </h2>
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                                         {matchingImages.map((img) => {
                                             const specLabel = ALL_SPECS.find(s => 
                                                 s.valueKey.toLowerCase() === img.field_name.toLowerCase() ||
@@ -459,12 +479,12 @@ export default function ProductSpecificationsPage() {
                                             return (
                                                 <Card key={img.id} className="border-0 shadow-lg pb-4 overflow-hidden bg-white ring-1 ring-black/5 hover:ring-black/10 transition-all duration-300 p-0">
                                                     <CardContent className="p-0 w-full">
-                                                        <div className=" bg-gradient-to-r from-[#007a6e] to-[#00897b] text-white px-5 py-2 flex justify-between items-center">
+                                                        <div className=" bg-gradient-to-r from-[#007a6e] to-[#00897b] text-white px-2 py-1 flex justify-between items-center">
                                                             <div className="flex flex-col">
                                                                 <span className="text-[10px] font-bold uppercase opacity-80 tracking-widest"></span>
-                                                                <span className="text-sm font-black">{specLabel}</span>
+                                                                <span className="text-xs font-black">{specLabel}</span>
                                                             </div>
-                                                            <div className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-md border border-white/30">
+                                                            <div className="bg-white/20 backdrop-blur-sm px-1 py-1 rounded-md border border-white/30">
                                                                 <span className="text-xs font-bold">{img.option_value}</span>
                                                             </div>
                                                         </div>
@@ -564,7 +584,7 @@ export default function ProductSpecificationsPage() {
                             
                             return (
                                 <button
-                                    onClick={() => window.open(getFileUrl(drawingPath), "_blank")}
+                                    onClick={() => window.open(`${getFileUrl(drawingPath)}#toolbar=0`, "_blank")}
                                     style={{
                                         height: "44px", padding: "0 22px",
                                         background: "#f57c00", color: "#fff",

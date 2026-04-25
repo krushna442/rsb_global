@@ -5,6 +5,7 @@
  * Supported formats:
  *  F1 – "FEA73900Rev No# 72057610426002246"
  *       PART_NO + "Rev No#" + REV(variable) + VENDOR(8) + MM(2) + YY(2) + SL(6)
+ *       Customer: ASL & Switch Mobility
  *
  *  F2 – "$"-delimited
  *       "7205761$FEA73900$002246$07.04.2026$NA$NA$REV$..."
@@ -13,17 +14,58 @@
  *  F3 – Fixed-width numeric block (no spaces / delimiters)
  *       00 + PART_NO(12) + REV(2) + VENDOR(6|7|8) + MM(2) + YY(2) + SL(6)
  *       Leading "00" is stripped from the 14-char block to get the real 12-digit part number.
+ *       Customer: TML
+ *
+ *  F4 – "#"-delimited with P/T/V prefix markers
+ *       "PID628567A#T15042026005687#V113072#"
+ *        P[plant][PART_NO] # T[DD][MM][YYYY][SL] # V[VENDOR] #
+ *       Customer: VECB
+ *
+ *  F5 – Fixed-width with embedded "V" vendor marker (no delimiters)
+ *       "ID628567AV113072150426005688"
+ *        [plant(1)] + [PART_NO(8)] + V + [VENDOR(6)] + [DD(2)] + [MM(2)] + [YY(2)] + [SL(6)]
+ *       Customer: VECB (alternate label format)
+ *
+ *  F6 – Same structure as F1 but vendor code contains a hyphen (e.g. "10830-6")
+ *       "H07050005Rev No#2 10830-60426005459"
+ *       PART_NO + "Rev No#" + REV(variable) + VENDOR(with hyphen) + MM(2) + YY(2) + SL(6)
+ *       The hyphen in the vendor code is preserved as-is.
+ *       Customer: IPLT
+ *
+ *  F7 – Fixed-width, no delimiters; VENDOR prefix + PART_NO + SL + REV + YY(2)
+ *       Field widths (partNoLen, slLen) are defined per vendor in F7_KNOWN_VENDORS.
+ *       "7201012FEA73900009781D26"       → vendor=7201012 part=FEA73900    sl=009781  rev=#D yy=2026
+ *       "R645355147411201040009780D26"   → vendor=R64535  part=514741120104 sl=0009780 rev=#D yy=2026
+ *       "R645355147411201040009779D26"   → vendor=R64535  part=514741120104 sl=0009779 rev=#D yy=2026
+ *       REV = bytes remaining between SL and the final YY (typically 1-2 chars).
+ *       No month field — dispatchDate is set to YYYY-01-01.
+ *       Customer: MBP (R64535 / 7201012 vendors)
  */
 
 /**
  * @typedef {Object} ParsedScan
- * @property {'F1'|'F2'|'F3'} format
+ * @property {'F1'|'F2'|'F3'|'F4'|'F5'|'F6'|'F7'} format
  * @property {string} partNo
  * @property {string} revNo        – normalised to "#", "#1", "#A", etc.
  * @property {string} vendorCode
  * @property {string} partSlNo
  * @property {string|null} dispatchDate  – "YYYY-MM-DD" when parseable, else null
  */
+
+// ---------------------------------------------------------------------------
+// Known vendor codes for F7 detection (add more as needed)
+// Each entry also declares:
+//   partNoLen – length of the part number field that follows the vendor prefix
+//   slLen     – length of the serial-number (SL) field
+// Ordered longest-first so a longer prefix wins over a shorter one.
+// ---------------------------------------------------------------------------
+const F7_KNOWN_VENDORS = [
+  { code: '7205761', partNoLen: 8,  slLen: 6 },  // alphanumeric part (e.g. FEA73900)
+  { code: '7201012', partNoLen: 8,  slLen: 6 },  // alphanumeric part (e.g. FEA73900)
+  { code: '7200868', partNoLen: 8,  slLen: 6 },  // alphanumeric part
+  { code: 'V113072', partNoLen: 8,  slLen: 6 },  // alphanumeric part
+  { code: 'R64535',  partNoLen: 12, slLen: 7 },  // 12-digit numeric part, 7-digit SL
+];
 
 /**
  * Normalise a raw rev token so different representations compare equal.
@@ -49,39 +91,105 @@ function isF2(text) {
 }
 
 /**
- * F1: contains "Rev No#" (case-insensitive) but NOT '$'
- * Allows optional space between "Rev No" and "#"
+ * F4: starts with 'P', uses '#' as delimiter (not '$'), and contains 'T' and 'V' sections.
+ * Example: "PID628567A#T15042026005687#V113072#"
  */
-function isF1(text) {
+function isF4(text) {
+  return (
+    text.startsWith('P') &&
+    text.includes('#') &&
+    !text.includes('$') &&
+    /^P.+#T\d+#V\w+#/.test(text)
+  );
+}
+
+/**
+ * F1 / F6: contains "Rev No#" (case-insensitive) but NOT '$'.
+ * F6 is distinguished from F1 after parsing by the presence of a hyphen in the vendor code.
+ */
+function isF1orF6(text) {
   return /rev\s*no\s*#/i.test(text) && !text.includes('$');
 }
 
 /**
+ * F5: fixed-width, all alphanumeric, exactly 28 chars, starts with a letter (plant code),
+ * and has 'V' at index 9 as the vendor marker.
+ * Example: "ID628567AV113072150426005688"
+ */
+function isF5(text) {
+  return (
+    text.length === 28 &&
+    /^[A-Z0-9]+$/i.test(text) &&
+    /^[A-Z]/i.test(text[0]) &&
+    text[9] === 'V' &&
+    !text.startsWith('00')
+  );
+}
+
+/**
+ * F7: fixed-width, no delimiters, starts with a known vendor prefix (6–7 chars).
+ * Total length is typically 20–30 chars, and must NOT match F3/F5 rules.
+ * Returns the matched vendor entry object { code, partNoLen, slLen }, or null if not F7.
+ */
+function detectF7Vendor(text) {
+  if (text.includes('$') || text.includes('#') || /rev\s*no\s*#/i.test(text)) return null;
+  if (text.startsWith('00')) return null;                // F3 territory
+  if (isF5(text))            return null;                // F5 wins
+
+  for (const entry of F7_KNOWN_VENDORS) {
+    if (text.startsWith(entry.code)) {
+       console.log(`DEBUG: Found F7 Vendor Prefix: ${entry.code}`);
+       const minLen = entry.code.length + entry.partNoLen + entry.slLen + 3;
+       if (text.length >= minLen) {
+         return entry;
+       } else {
+         console.log(`DEBUG: F7 match failed length check. Needed ${minLen}, got ${text.length}`);
+       }
+    }
+  }
+  return null;
+}
+
+function isF7(text) {
+  return /^[A-Z]\d{5}\d{10}/.test(text);
+}
+/**
  * F3: everything else that looks like a long numeric+alpha fixed block.
- * We accept it as F3 when length is 30-36 and no spaces.
+ * Accepted when length is 30–36 and no spaces.
  */
 function isF3(text) {
-  return /^[A-Z0-9]+$/i.test(text.trim()) && text.trim().length >= 30;
+  const t = text.trim();
+
+  return (
+    t.startsWith('00') &&          // strong indicator
+    /^[A-Z0-9]+$/i.test(t) &&     // no delimiters
+    t.length >= 30
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Individual parsers
 // ---------------------------------------------------------------------------
 
-function parseF1(text) {
+/**
+ * Shared F1/F6 core parser.
+ * Returns the raw result with vendor code; the caller labels it F1 or F6
+ * based on whether the vendor code contains a hyphen.
+ */
+function parseF1core(text) {
   // Match: PART_NO + "Rev No#" + optional_rev_digits + space? + REST
-  // REST = VENDOR(7 or 8) + MM(2) + YY(2) + SL(6)
+  // REST = VENDOR + MM(2) + YY(2) + SL(6)
   const match = text.match(/^(.+?)\s*[Rr]ev\s*[Nn]o\s*#([^\s]*)\s*(.+)$/);
   if (!match) return null;
 
-  const partNo = match[1].trim();
-  const revSuffix = match[2].trim();          // e.g. "" | "1" | "A" | "2"
-  const rest   = match[3].trim();             // e.g. "72057610426002246" or "7205761 0426002246"
-  // Collapse any spaces inside rest (some scanners insert spaces)
+  const partNo    = match[1].trim();
+  const revSuffix = match[2].trim();   // e.g. "" | "1" | "2" | "A"
+  const rest      = match[3].trim();
+
+  // Collapse spaces inside rest (some scanners insert spaces)
   const restClean = rest.replace(/\s+/g, '');
 
-  // Read from the right: SL=6, YY=2, MM=2 → fixed 10 chars from right
-  // Everything left of that is the vendor code
+  // Read from the right: SL=6, YY=2, MM=2 → 10 fixed chars
   if (restClean.length < 12) return null;
 
   const sl     = restClean.slice(-6);
@@ -92,7 +200,13 @@ function parseF1(text) {
   const rev = revSuffix ? normaliseRev('#' + revSuffix) : '#';
   const dispatchDate = buildDate(year, month, null);
 
-  return { format: 'F1', partNo, revNo: rev, vendorCode: vendor, partSlNo: sl, dispatchDate };
+  return { partNo, revNo: rev, vendorCode: vendor, partSlNo: sl, dispatchDate };
+}
+
+function parseF1(text) {
+  const result = parseF1core(text);
+  if (!result) return null;
+  return { format: 'F1', ...result };
 }
 
 function parseF2(text) {
@@ -103,8 +217,9 @@ function parseF2(text) {
   const vendor  = parts[0];
   const partNo  = parts[1];
   const sl      = parts[2];
-  const dateRaw = parts[3]; // "07.04.2026" or "NA"
-  // REV is typically at index 6, but fall back to first '#'-containing token
+  const dateRaw = parts[3]; // "DD.MM.YYYY" or "NA"
+
+  // REV is typically at index 6; fall back to first '#'-containing token
   let revRaw = parts[6] ?? '';
   if (!revRaw || revRaw.toUpperCase() === 'NA') {
     revRaw = parts.find(p => p.includes('#')) ?? '#';
@@ -126,15 +241,15 @@ function parseF3(text) {
 
   /**
    * Supported fixed-width layouts (all numeric+alpha, no delimiters):
-   *   Layout A: 00+partNo(12) + rev(2) + vendor(6) + MM(2) + YY(2) + SL(6)  = 32  ← confirmed
+   *   Layout A: 00+partNo(12) + rev(2) + vendor(6) + MM(2) + YY(2) + SL(6)  = 32
    *   Layout B: 00+partNo(12) + rev(2) + vendor(7) + MM(2) + YY(2) + SL(6)  = 33
    *   Layout C: 00+partNo(12) + rev(2) + vendor(8) + MM(2) + YY(2) + SL(6)  = 34
    *
-   * The first 14 chars are consumed as a block; the leading "00" is then
-   * stripped to yield the real 12-digit part number.
+   * The first 14 chars are consumed as a block; the leading "00" is stripped
+   * to yield the real 12-digit part number.
    */
   const layouts = [
-    { partLen: 14, vendorLen: 6 },  // total 32 – confirmed from real sample
+    { partLen: 14, vendorLen: 6 },  // total 32
     { partLen: 14, vendorLen: 7 },  // total 33
     { partLen: 14, vendorLen: 8 },  // total 34
   ];
@@ -144,7 +259,6 @@ function parseF3(text) {
     if (t.length !== total) continue;
 
     let offset = 0;
-    // Consume 14 chars but strip the leading "00" to get the real 12-digit part number
     const partNo = t.slice(offset, offset + partLen).replace(/^00/, ''); offset += partLen;
     const revRaw = t.slice(offset, offset + 2);         offset += 2;
     const vendor = t.slice(offset, offset + vendorLen); offset += vendorLen;
@@ -165,6 +279,163 @@ function parseF3(text) {
     };
   }
   return null;
+}
+
+/**
+ * F4 – "#"-delimited with P / T / V prefix markers.
+ * Example: "PID628567A#T15042026005687#V113072#"
+ *
+ * Structure:
+ *   segment[0] = P + plant_char + PART_NO
+ *   segment[1] = T + DD(2) + MM(2) + YYYY(4) + SL(6)
+ *   segment[2] = V + VENDOR
+ */
+function parseF4(text) {
+  const segments = text.split('#').map(s => s.trim());
+  // Need at least three non-empty segments
+  if (segments.length < 3) return null;
+
+  const seg0 = segments[0]; // e.g. "PID628567A"
+  const seg1 = segments[1]; // e.g. "T15042026005687"
+  const seg2 = segments[2]; // e.g. "V113072"
+
+  if (!seg0.startsWith('P') || !seg1.startsWith('T') || !seg2.startsWith('V')) return null;
+
+  // seg0: P + plant(1) + partNo(rest)
+  const partNo = seg0.slice(2);  // strip 'P' and plant char
+
+  // seg1: T + DD(2) + MM(2) + YYYY(4) + SL(6)  → 1+2+2+4+6 = 15 chars
+  if (seg1.length < 15) return null;
+  const dd   = seg1.slice(1, 3);
+  const mm   = seg1.slice(3, 5);
+  const yyyy = seg1.slice(5, 9);
+  const sl   = seg1.slice(9, 15);
+
+  // seg2: V + VENDOR
+  const vendor = seg2.slice(1);
+
+  const dispatchDate = buildDate(yyyy, mm, dd);
+
+  return {
+    format: 'F4',
+    partNo,
+    revNo: '#',            // no explicit rev field in this format
+    vendorCode: vendor,
+    partSlNo: sl,
+    dispatchDate,
+  };
+}
+
+/**
+ * F5 – Fixed-width with embedded "V" vendor marker (no delimiters).
+ * Example: "ID628567AV113072150426005688"
+ *
+ * Layout (28 chars):
+ *   plant(1) + PART_NO(8) + 'V' + VENDOR(6) + DD(2) + MM(2) + YY(2) + SL(6)
+ */
+function parseF5(text) {
+  const t = text.trim();
+  if (t.length !== 28) return null;
+
+  // plant  = t[0]      (single letter, e.g. 'I')
+  const partNo = t.slice(1, 9);   // 8 chars
+  // t[9] === 'V'  (marker, verified by isF5)
+  const vendor = t.slice(10, 16); // 6 chars
+  const dd     = t.slice(16, 18);
+  const mm     = t.slice(18, 20);
+  const year   = '20' + t.slice(20, 22);
+  const sl     = t.slice(22, 28);
+
+  const dispatchDate = buildDate(year, mm, dd);
+
+  return {
+    format: 'F5',
+    partNo,
+    revNo: '#',            // no explicit rev field in this format
+    vendorCode: vendor,
+    partSlNo: sl,
+    dispatchDate,
+  };
+}
+
+/**
+ * F6 – Same barcode structure as F1 but the vendor code contains a hyphen (e.g. "10830-6").
+ * The hyphen is preserved exactly as scanned.
+ * Example: "H07050005Rev No#2 10830-60426005459"
+ */
+function parseF6(text) {
+  const result = parseF1core(text);
+  if (!result) return null;
+  // F6 is confirmed when the extracted vendor code contains a hyphen
+  if (!result.vendorCode.includes('-')) return null;
+  return { format: 'F6', ...result };
+}
+
+/**
+ * F7 – Fixed-width, no delimiters; vendor prefix followed by part number, SL, REV, YY.
+ *
+ * Layout:
+ *   VENDOR(6|7) + PART_NO(partNoLen) + SL(slLen) + REV(1|2) + YY(2)
+ *
+ * partNoLen and slLen come from the F7_KNOWN_VENDORS lookup for the matched vendor.
+ * REV is whatever remains between SL and YY (typically 1–2 chars, e.g. "D", "0D").
+ * No month field is present; dispatchDate is set to YYYY-01-01.
+ *
+ * Examples (vendor R64535: partNoLen=12, slLen=7):
+ *   "R645355147411201040009780D26" → vendor=R64535 part=514741120104 sl=0009780 rev=#D  yy=2026
+ *   "R645355147411201040009779D26" → vendor=R64535 part=514741120104 sl=0009779 rev=#D  yy=2026
+ *
+ * Example (vendor 7201012: partNoLen=8, slLen=6):
+ *   "7201012FEA73900009781D26"     → vendor=7201012 part=FEA73900  sl=009781  rev=#D  yy=2026
+ */
+function parseF7(text) {
+  const t = text.trim();
+
+  if (!isF7(t)) return null;
+
+  const vendor = t.slice(0, 6);     // R64535
+  const partNo = t.slice(6, 18);    // 514741120104
+
+  console.log("DEBUG: F7 Vendor:", vendor);
+  console.log("DEBUG: F7 PartNo:", partNo);
+
+  return {
+    format: 'F7',
+    partNo,
+    revNo: '#',
+    vendorCode: vendor,
+    partSlNo: t.slice(16), // optional
+    dispatchDate: null
+  };
+}
+function isF8(text) {
+  return /[A-Z]{3}\d{5}/.test(text);
+}
+function parseF8(text) {
+  const t = text.trim();
+
+  // Extract part number (first occurrence)
+  const match = t.match(/[A-Z]{3}\d{5}/);
+
+  if (!match) return null;
+
+  const partNo = match[0];
+  const index = match.index;
+
+  const vendor = t.slice(0, index);       // before partNo
+  const remaining = t.slice(index + 8);   // after partNo
+
+  console.log("DEBUG: F8 Vendor:", vendor);
+  console.log("DEBUG: F8 PartNo:", partNo);
+
+  return {
+    format: 'F8',
+    partNo,
+    revNo: '#',
+    vendorCode: vendor,
+    partSlNo: remaining,
+    dispatchDate: null
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -190,16 +461,30 @@ function buildDate(year, month, day) {
  * Parse a scanned barcode string into structured fields.
  * Returns null if no format matched.
  *
+ * Detection order:
+ *   F2  → '$'-delimited
+ *   F4  → '#'-delimited with P/T/V markers
+ *   F6  → "Rev No#" + hyphenated vendor  (must precede F1 check)
+ *   F1  → "Rev No#" (no hyphen in vendor)
+ *   F5  → fixed-width, 28 chars, plant + V-marker
+ *   F7  → fixed-width, starts with known vendor prefix (6–7 chars), no month field
+ *   F3  → fixed-width, 30–36 chars, leading "00" prefix
+ *
  * @param {string} scannedText
  * @returns {ParsedScan|null}
  */
 export function parseScanText(scannedText) {
   if (!scannedText) return null;
   const text = scannedText.trim();
+if (isF2(text))     return parseF2(text);
+if (isF4(text))     return parseF4(text);
+if (isF7(text))     return parseF7(text);
+if (isF1orF6(text)) return parseF6(text) ?? parseF1(text);
+if (isF5(text))     return parseF5(text);
+if (isF3(text))     return parseF3(text);   // ✅ strong match
+if (isF8(text))     return parseF8(text);   // ✅ fallback pattern
 
-  if (isF2(text)) return parseF2(text);
-  if (isF1(text)) return parseF1(text);
-  if (isF3(text)) return parseF3(text);
+  
 
   return null;
 }

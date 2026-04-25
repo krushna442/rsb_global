@@ -21,9 +21,13 @@ import {
     Search,
     Filter,
     Download,
+    Pencil,
+    Check,
+    X,
 } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useScannedProducts } from "@/contexts/ScannedProductsContext";
+import { useUser } from "@/contexts/UserContext";
 import {
     PieChart,
     Pie,
@@ -95,7 +99,11 @@ export default function ScannedProductsPage() {
         loading,
         fetchScannedProducts,
         fetchScanStats,
+        updateRemarks,
     } = useScannedProducts();
+
+    const { user } = useUser();
+    const isAdminOrSuper = user?.role === "admin" || user?.role === "super admin";
 
     // Filter state
     const [dateFilter, setDateFilter] = useState("this_month");
@@ -108,11 +116,15 @@ export default function ScannedProductsPage() {
 
     // NEW: Toggle between pie and rejection breakdown
     const [showRejectionChart, setShowRejectionChart] = useState(false);
+    const [selectedVolume, setSelectedVolume] = useState<any | null>(null);
 
     // Client-side pagination — no API call on page change
     const [currentPage, setCurrentPage] = useState(1);
 
     const [isExporting, setIsExporting] = useState(false);
+    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editingRemarks, setEditingRemarks] = useState("");
+    const [isSavingRemarks, setIsSavingRemarks] = useState(false);
     const initialMount = useRef(true);
 
     // ── Fetch ALL records whenever filter/search changes ─────────────────────
@@ -290,6 +302,38 @@ export default function ScannedProductsPage() {
         return Object.entries(map).map(([type, val]) => ({ type, ...val })).sort((a, b) => (b.accepted + b.rejected) - (a.accepted + a.rejected));
     }, [scannedProducts]);
 
+    const partVolumeData = useMemo(() => {
+        if (!scannedProducts.length) return [];
+        
+        const map: Record<string, number> = {};
+        scannedProducts.forEach((s) => {
+            const pn = s.part_no || "Unknown";
+            map[pn] = (map[pn] || 0) + 1;
+        });
+
+        const total = scannedProducts.length;
+        
+        const highParts: {pn: string, count: number}[] = [];
+        const mediumParts: {pn: string, count: number}[] = [];
+        const lowParts: {pn: string, count: number}[] = [];
+        const strangerParts: {pn: string, count: number}[] = [];
+
+        Object.entries(map).forEach(([pn, count]) => {
+            const pct = (count / total) * 100;
+            if (pct > 50) highParts.push({ pn, count });
+            else if (pct > 30) mediumParts.push({ pn, count });
+            else if (pct > 10) lowParts.push({ pn, count });
+            else strangerParts.push({ pn, count });
+        });
+
+        return [
+            { name: "High (>50%)", value: highParts.length, color: "#10b981", parts: highParts, totalCount: highParts.reduce((a, b) => a + b.count, 0) },
+            { name: "Medium (30-50%)", value: mediumParts.length, color: "#3b82f6", parts: mediumParts, totalCount: mediumParts.reduce((a, b) => a + b.count, 0) },
+            { name: "Low (10-30%)", value: lowParts.length, color: "#f59e0b", parts: lowParts, totalCount: lowParts.reduce((a, b) => a + b.count, 0) },
+            { name: "Stranger (<10%)", value: strangerParts.length, color: "#ef4444", parts: strangerParts, totalCount: strangerParts.reduce((a, b) => a + b.count, 0) },
+        ].filter(d => d.value > 0);
+    }, [scannedProducts]);
+
     // ── Page title ────────────────────────────────────────────────────────────
     const tableTitle =
         dateFilter === "today"      ? "Today's Scans" :
@@ -305,6 +349,30 @@ export default function ScannedProductsPage() {
         if (currentPage >= totalPages - 2) return [totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
         return [currentPage - 2, currentPage - 1, currentPage, currentPage + 1, currentPage + 2];
     }, [currentPage, totalPages]);
+
+    const handleEditRemarks = (scan: any) => {
+        setEditingId(scan.id);
+        setEditingRemarks(scan.remarks || "");
+    };
+
+    const handleSaveRemarks = async () => {
+        if (editingId === null) return;
+        setIsSavingRemarks(true);
+        try {
+            const success = await updateRemarks(editingId, editingRemarks);
+            if (success) {
+                setEditingId(null);
+                setEditingRemarks("");
+            }
+        } finally {
+            setIsSavingRemarks(false);
+        }
+    };
+
+    const handleCancelEdit = () => {
+        setEditingId(null);
+        setEditingRemarks("");
+    };
 
     // ─────────────────────────────────────────────────────────────────────────
     return (
@@ -516,7 +584,7 @@ export default function ScannedProductsPage() {
                         </div>
 
                         {/* Row 3 */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                             <Card className="border shadow-sm rounded-2xl bg-white overflow-hidden">
                                 <CardHeader className="pb-2 border-b bg-gradient-to-r from-indigo-50/50 to-transparent">
                                     <CardTitle className="text-sm font-semibold text-slate-800 flex items-center gap-2">
@@ -572,6 +640,79 @@ export default function ScannedProductsPage() {
                                         </div>
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">No data</div>
+                                    )}
+                                </CardContent>
+                            </Card>
+
+                            <Card className="border shadow-sm rounded-2xl bg-white overflow-hidden">
+                                <CardHeader className="pb-2 border-b bg-gradient-to-r from-cyan-50/50 to-transparent">
+                                    <div className="flex items-center justify-between">
+                                        <CardTitle className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-cyan-500" />
+                                            {selectedVolume ? `Details: ${selectedVolume.name}` : "Volume Distribution"}
+                                        </CardTitle>
+                                        {selectedVolume && (
+                                            <button
+                                                onClick={() => setSelectedVolume(null)}
+                                                className="text-[11px] text-blue-600 border border-blue-200 bg-blue-50 rounded-md px-2 py-1 hover:bg-blue-100 transition-colors font-medium"
+                                            >
+                                                ← Back
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                                        {selectedVolume ? "Part number list and scan counts" : "Part counts by volume contribution"}
+                                    </p>
+                                </CardHeader>
+                                <CardContent className="flex justify-center h-[260px] pt-4">
+                                    {selectedVolume ? (
+                                        <div className="w-full flex flex-col">
+                                            <div className="flex justify-between items-center mb-3 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                                <span className="text-[10px] font-bold text-slate-500 uppercase">Total Category Scans:</span>
+                                                <span className="text-xs font-bold text-cyan-600">{selectedVolume.totalCount}</span>
+                                            </div>
+                                            <div className="overflow-y-auto pr-1 flex-1 scrollbar-thin scrollbar-thumb-slate-200">
+                                                <Table>
+                                                    <TableBody>
+                                                        {[...selectedVolume.parts]
+                                                            .sort((a: any, b: any) => b.count - a.count)
+                                                            .map((p: any) => (
+                                                                <TableRow key={p.pn} className="hover:bg-slate-50/50">
+                                                                    <TableCell className="py-2 text-[10px] font-medium text-slate-700">{p.pn}</TableCell>
+                                                                    <TableCell className="py-2 text-[10px] text-right font-bold text-slate-900">{p.count}</TableCell>
+                                                                </TableRow>
+                                                            ))}
+                                                    </TableBody>
+                                                </Table>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        partVolumeData.length > 0 ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={partVolumeData}
+                                                        innerRadius={55}
+                                                        outerRadius={80}
+                                                        paddingAngle={4}
+                                                        dataKey="value"
+                                                        label={({ name, value }) => `${value}`}
+                                                        labelLine={false}
+                                                        fontSize={10}
+                                                        onClick={(entry) => setSelectedVolume(entry.payload)}
+                                                        style={{ cursor: "pointer" }}
+                                                    >
+                                                        {partVolumeData.map((entry, i) => (
+                                                            <Cell key={i} fill={entry.color} />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip contentStyle={tooltipStyle} />
+                                                    <Legend iconType="circle" wrapperStyle={{ fontSize: 10 }} />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">No data</div>
+                                        )
                                     )}
                                 </CardContent>
                             </Card>
@@ -787,7 +928,11 @@ export default function ScannedProductsPage() {
                                             <TableRow
                                                 key={scan.id}
                                                 className={`hover:bg-slate-50/50 transition-colors border-b last:border-0 ${
-                                                    scan.is_rejected ? "bg-red-100" : ""
+                                                    scan.is_rejected&&!scan.is_remarks_edited
+                                                        ? "bg-amber-200" 
+                                                        : scan.is_rejected 
+                                                            ? "bg-red-100" 
+                                                            : ""
                                                 }`}
                                             >
                                                 <TableCell className="pl-6 font-mono text-xs font-medium text-slate-600">{scan.sl_no || scan.id || "-"}</TableCell>
@@ -800,7 +945,46 @@ export default function ScannedProductsPage() {
                                                 <TableCell className="text-xs font-medium text-slate-500 whitespace-nowrap">{scan.plant_location || "-"}</TableCell>
                                                 <TableCell className="text-xs font-mono font-medium text-slate-700 whitespace-nowrap">{scan.part_sl_no || "-"}</TableCell>
                                                 <TableCell className="text-xs font-mono font-medium text-slate-500 max-w-[200px] truncate" title={scan.scanned_text}>{scan.scanned_text || "-"}</TableCell>
-                                                <TableCell className="text-xs font-medium text-slate-600 max-w-[200px] truncate" title={scan.remarks}>{scan.remarks || "-"}</TableCell>
+                                                <TableCell className="text-xs font-medium text-slate-600 min-w-[200px]">
+                                                    {editingId === scan.id ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <Input
+                                                                className="h-7 text-xs bg-white border-primary/50 focus:border-primary"
+                                                                value={editingRemarks}
+                                                                onChange={(e) => setEditingRemarks(e.target.value)}
+                                                                autoFocus
+                                                            />
+                                                            <button
+                                                                onClick={handleSaveRemarks}
+                                                                disabled={isSavingRemarks}
+                                                                className="p-1 rounded-md bg-emerald-100 text-emerald-600 hover:bg-emerald-200 transition-colors disabled:opacity-50"
+                                                            >
+                                                                <Check className="w-3 h-3" />
+                                                            </button>
+                                                            <button
+                                                                onClick={handleCancelEdit}
+                                                                className="p-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                                                            >
+                                                                <X className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="group/remark flex items-center justify-between gap-2">
+                                                            <span className="truncate max-w-[180px]" title={scan.remarks}>
+                                                                {scan.remarks || "-"}
+                                                            </span>
+                                                            {isAdminOrSuper && (
+                                                                <button
+                                                                    onClick={() => handleEditRemarks(scan)}
+                                                                    className="opacity-0 group-hover/remark:opacity-100 p-1 rounded-md hover:bg-slate-100 text-slate-400 hover:text-primary transition-all"
+                                                                    title="Edit remarks"
+                                                                >
+                                                                    <Pencil className="w-3 h-3" />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell className="pr-6 text-xs font-medium text-slate-500 whitespace-nowrap">{scan.created_by || "System"}</TableCell>
                                             </TableRow>
                                         ))

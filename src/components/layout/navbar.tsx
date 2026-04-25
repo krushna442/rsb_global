@@ -37,29 +37,12 @@ export function Navbar() {
             {/* Left */}
             <div className="flex items-center gap-3">
                 <MobileSidebar />
-                <div className="relative hidden sm:block">
-                <Link   href="/product-specifications">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                        placeholder="Search products, parts, documents..."
-                        className="w-[280px] lg:w-[360px] pl-9 h-9 bg-muted/50 border-transparent focus:border-primary/30 text-sm transition-all"
-                    />
-                </Link>
-                </div>
             </div>
 
             {/* Right */}
             <div className="flex items-center gap-2">
-                {/* Search (mobile) */}
-                <Button variant="ghost" size="icon" className="sm:hidden h-9 w-9">
-                    <Search className="w-4 h-4" />
-                </Button>
 
-                {/* Export */}
-                <Button variant="ghost" size="sm" className="hidden md:flex gap-1.5 h-9 text-xs font-medium text-muted-foreground hover:text-foreground">
-                    <Download className="w-3.5 h-3.5" />
-                    Export
-                </Button>
+
 
                 {/* Language */}
                 <DropdownMenu>
@@ -75,19 +58,10 @@ export function Navbar() {
                         <DropdownMenuItem onClick={() => setLanguage("en")} className="text-xs">
                             🇺🇸 English
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setLanguage("hi")} className="text-xs">
-                            🇮🇳 Hindi
-                        </DropdownMenuItem>
+
                     </DropdownMenuContent>
                 </DropdownMenu>
 
-                {/* Notifications */}
-                <Button variant="ghost" size="icon" className="relative h-9 w-9">
-                    <Bell className="w-4 h-4 text-muted-foreground" />
-                    <Badge className="absolute -top-0.5 -right-0.5 h-4 w-4 p-0 flex items-center justify-center text-[9px] bg-red-500 text-white border-2 border-card">
-                        3
-                    </Badge>
-                </Button>
 
                 {/* User Info */}
                 {user && (
