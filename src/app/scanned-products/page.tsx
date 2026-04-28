@@ -44,6 +44,7 @@ import {
     Legend,
 } from "recharts";
 import * as XLSX from "xlsx";
+import { Badge } from "@/components/ui/badge";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -246,22 +247,47 @@ export default function ScannedProductsPage() {
             { name: "Pending",  value: Math.max(0, scanStats.total - scanStats.pass - scanStats.rejected), color: "#f59e0b" },
         ].filter((d) => d.value > 0);
     }, [scanStats]);
+  const hourlyLogs = useMemo(() => {
+    const hours = [
+      "6 AM", "7 AM", "8 AM", "9 AM", "10 AM", "11 AM", "12 PM", "1 PM",
+      "2 PM", "3 PM", "4 PM", "5 PM", "6 PM", "7 PM", "8 PM", "9 PM",
+      "10 PM", "11 PM", "12 AM", "1 AM", "2 AM", "3 AM", "4 AM", "5 AM"
+    ];
+    const buckets = hours.map(h => ({ time: h, scans: 0 }));
+    
+const now = new Date();
+const start = new Date();
+start.setHours(6, 0, 0, 0);
 
-    const lineData = useMemo(() => {
-        if (!scannedProducts.length) return [];
-        const hourly = scannedProducts.reduce((acc, curr) => {
-            if (!curr.created_at) return acc;
-            const clean = curr.created_at.endsWith("Z") ? curr.created_at.slice(0, -1) : curr.created_at;
-            const d = new Date(clean);
-            if (isNaN(d.getTime())) return acc;
-            const hour = d.getHours();
-            const label = hour === 0 ? "12AM" : hour < 12 ? `${hour}AM` : hour === 12 ? "12PM" : `${hour - 12}PM`;
-            if (!acc[label]) acc[label] = { time: label, count: 0, hourNum: hour };
-            acc[label].count += 1;
-            return acc;
-        }, {} as Record<string, { time: string; count: number; hourNum: number }>);
-        return Object.values(hourly).sort((a, b) => a.hourNum - b.hourNum);
-    }, [scannedProducts]);
+if (now.getHours() < 6) {
+  start.setDate(start.getDate() - 1);
+}
+
+const end = new Date(start);
+end.setDate(end.getDate() + 1);
+
+scannedProducts?.forEach(scan => {
+const raw = scan.created_at;
+
+// Remove UTC interpretation
+const date = new Date(raw.replace("Z", ""));
+
+  if (date >= start && date < end) {
+    const hour = date.getHours();
+
+    let index = hour - 6;
+    if (index < 0) index += 24;
+
+    if (index >= 0 && index < 24) {
+      buckets[index].scans++;
+    }
+  }
+});
+
+
+    return buckets;
+  }, [scannedProducts]);
+
 
     const customerData = useMemo(() => {
         const map: Record<string, number> = {};
@@ -501,30 +527,38 @@ export default function ScannedProductsPage() {
                             </Card>
 
                             {/* Daily Verification Logs */}
-                            <Card className="border shadow-sm col-span-1 lg:col-span-2 rounded-2xl bg-white overflow-hidden">
-                                <CardHeader className="pb-2 border-b bg-gradient-to-r from-teal-50/50 to-transparent">
-                                    <CardTitle className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                                        <span className="w-2 h-2 rounded-full bg-teal-500" />
-                                        Daily Verification Logs
-                                    </CardTitle>
-                                    <p className="text-[11px] text-muted-foreground mt-0.5">Hourly scan activity</p>
-                                </CardHeader>
-                                <CardContent className="h-[260px] p-6">
-                                    {lineData.length > 0 ? (
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <LineChart data={lineData} margin={{ top: 10, right: 30, left: -20, bottom: 0 }}>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                <XAxis dataKey="time" tick={{ fontSize: 11, fill: "#64748b" }} tickMargin={12} axisLine={false} tickLine={false} />
-                                                <YAxis tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                                                <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: "#cbd5e1", strokeWidth: 1, strokeDasharray: "4 4" }} />
-                                                <Line type="monotone" dataKey="count" name="Scans" stroke="#0d9488" strokeWidth={3} dot={{ r: 5, fill: "#0d9488", strokeWidth: 2, stroke: "#fff" }} activeDot={{ r: 7, fill: "#0d9488", strokeWidth: 0 }} animationDuration={1500} />
-                                            </LineChart>
-                                        </ResponsiveContainer>
-                                    ) : (
-                                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-sm">No scan activity logged.</div>
-                                    )}
-                                </CardContent>
-                            </Card>
+         <Card className="border-0  shadow-sm lg:col-span-2 overflow-hidden w-full">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm font-semibold">Live Check Activity</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">Scans from 6 AM today to 6 AM tomorrow</p>
+                </div>
+                <Badge variant="outline" className="text-[10px] font-bold border-emerald-200 text-emerald-700 bg-emerald-50">
+                  LIVE TRACKING
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-2">
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={hourlyLogs}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                  <XAxis dataKey="time" tick={{ fontSize: 10, fontWeight: 500 }} tickLine={false} axisLine={false} dy={10} interval={2} />
+                  <YAxis tick={{ fontSize: 11, fontWeight: 500 }} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
+                  <Line 
+                    type="monotone" 
+                    dataKey="scans" 
+                    name="Scans"
+                    stroke="#0d9488" 
+                    strokeWidth={3} 
+                    dot={{ fill: "#0d9488", r: 3, strokeWidth: 1, stroke: "#fff" }} 
+                    activeDot={{ r: 5, strokeWidth: 0 }} 
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
                         </div>
 
                         {/* Row 2 */}

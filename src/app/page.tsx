@@ -449,36 +449,27 @@ scannedProducts?.forEach(scan => {
             </CardContent>
           </Card>
 
-          <Card className="border-0 shadow-sm overflow-hidden">
+          <Card className="border-0  shadow-sm overflow-hidden ">
             <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-sm font-semibold">Live Check Activity</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">Scans from 6 AM today to 6 AM tomorrow</p>
-                </div>
-                <Badge variant="outline" className="text-[10px] font-bold border-emerald-200 text-emerald-700 bg-emerald-50">
-                  LIVE TRACKING
-                </Badge>
-              </div>
+              <CardTitle className="text-sm font-semibold">Series Distribution</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Products grouped by series</p>
             </CardHeader>
-            <CardContent className="pt-2">
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={hourlyLogs}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                  <XAxis dataKey="time" tick={{ fontSize: 10, fontWeight: 500 }} tickLine={false} axisLine={false} dy={10} interval={2} />
-                  <YAxis tick={{ fontSize: 11, fontWeight: 500 }} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
-                  <Line 
-                    type="monotone" 
-                    dataKey="scans" 
-                    name="Scans"
-                    stroke="#0d9488" 
-                    strokeWidth={3} 
-                    dot={{ fill: "#0d9488", r: 3, strokeWidth: 1, stroke: "#fff" }} 
-                    activeDot={{ r: 5, strokeWidth: 0 }} 
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+            <CardContent className="pt-2 h-[260px]">
+              {seriesGroupData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={seriesGroupData} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#334155" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} cursor={{ fill: "#f8fafc" }} />
+                    <Bar dataKey="value" name="Products" radius={[4, 4, 0, 0]} animationDuration={1000}>
+                      {seriesGroupData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No Data</div>
+              )}
             </CardContent>
           </Card>
         </div>
