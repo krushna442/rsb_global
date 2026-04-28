@@ -210,6 +210,7 @@ export default function ScannedProductsPage() {
                 "Validation Status": scan.validation_status?.toUpperCase() || "-",
                 "Is Rejected?":      scan.is_rejected ? "Yes" : "No",
                 "Remarks":           scan.remarks || "-",
+                "Admin Remarks":     scan.admin_remarks || "-",
                 "Created By":        scan.created_by || "System",
             }));
 
@@ -352,7 +353,7 @@ export default function ScannedProductsPage() {
 
     const handleEditRemarks = (scan: any) => {
         setEditingId(scan.id);
-        setEditingRemarks(scan.remarks || "");
+        setEditingRemarks(scan.admin_remarks || "");
     };
 
     const handleSaveRemarks = async () => {
@@ -905,7 +906,7 @@ export default function ScannedProductsPage() {
                             <Table>
                                 <TableHeader>
                                     <TableRow className="bg-slate-50 border-b">
-                                        {["Sr no.","Shift","Scanned Date","Customer Name","Vendor Code","Plant Code","Part No.","Plant Location","Part SL No.","Scanned Text","Remarks","Created By"].map((h) => (
+                                        {["Sr no.","Shift","Scanned Date","Customer Name","Vendor Code","Plant Code","Part No.","Plant Location","Part SL No.","Scanned Text","Remarks","Admin Remarks","Created By"].map((h) => (
                                             <TableHead key={h} className="text-xs font-bold uppercase tracking-wider text-slate-500 h-12 px-4 whitespace-nowrap first:pl-6 last:pr-6">{h}</TableHead>
                                         ))}
                                     </TableRow>
@@ -913,13 +914,13 @@ export default function ScannedProductsPage() {
                                 <TableBody>
                                     {loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={12} className="text-center py-12 text-muted-foreground font-medium">
+                                            <TableCell colSpan={13} className="text-center py-12 text-muted-foreground font-medium">
                                                 Loading scans…
                                             </TableCell>
                                         </TableRow>
                                     ) : pagedProducts.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={12} className="text-center py-12 text-muted-foreground font-medium">
+                                            <TableCell colSpan={13} className="text-center py-12 text-muted-foreground font-medium">
                                                 No scanned products found for the selected filter.
                                             </TableCell>
                                         </TableRow>
@@ -928,7 +929,7 @@ export default function ScannedProductsPage() {
                                             <TableRow
                                                 key={scan.id}
                                                 className={`hover:bg-slate-50/50 transition-colors border-b last:border-0 ${
-                                                    scan.is_rejected&&!scan.is_remarks_edited
+                                                    scan.is_rejected&&scan.is_remarks_edited
                                                         ? "bg-amber-200" 
                                                         : scan.is_rejected 
                                                             ? "bg-red-100" 
@@ -945,6 +946,11 @@ export default function ScannedProductsPage() {
                                                 <TableCell className="text-xs font-medium text-slate-500 whitespace-nowrap">{scan.plant_location || "-"}</TableCell>
                                                 <TableCell className="text-xs font-mono font-medium text-slate-700 whitespace-nowrap">{scan.part_sl_no || "-"}</TableCell>
                                                 <TableCell className="text-xs font-mono font-medium text-slate-500 max-w-[200px] truncate" title={scan.scanned_text}>{scan.scanned_text || "-"}</TableCell>
+                                                <TableCell className="text-xs font-medium text-slate-600 min-w-[200px]">
+                                                    <span className="truncate max-w-[180px]" title={scan.remarks}>
+                                                        {scan.remarks || "-"}
+                                                    </span>
+                                                </TableCell>
                                                 <TableCell className="text-xs font-medium text-slate-600 min-w-[200px]">
                                                     {editingId === scan.id ? (
                                                         <div className="flex items-center gap-2">
@@ -970,14 +976,14 @@ export default function ScannedProductsPage() {
                                                         </div>
                                                     ) : (
                                                         <div className="group/remark flex items-center justify-between gap-2">
-                                                            <span className="truncate max-w-[180px]" title={scan.remarks}>
-                                                                {scan.remarks || "-"}
+                                                            <span className="truncate max-w-[180px]">
+                                                                {scan.admin_remarks || "-"}
                                                             </span>
                                                             {isAdminOrSuper && (
                                                                 <button
                                                                     onClick={() => handleEditRemarks(scan)}
                                                                     className="opacity-0 group-hover/remark:opacity-100 p-1 rounded-md hover:bg-slate-100 text-slate-400 hover:text-primary transition-all"
-                                                                    title="Edit remarks"
+                                                                    title="Edit admin remarks"
                                                                 >
                                                                     <Pencil className="w-3 h-3" />
                                                                 </button>

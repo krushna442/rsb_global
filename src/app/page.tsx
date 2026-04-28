@@ -262,7 +262,7 @@ scannedProducts?.forEach(scan => {
         map[c] = (map[c] || 0) + 1;
       });
     });
-    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a,b)=>b.value - a.value).slice(0, 6);
+    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a,b)=>b.value - a.value);
   }, [products]);
 
   const partTypeGroupData = useMemo(() => {
@@ -273,7 +273,7 @@ scannedProducts?.forEach(scan => {
       map[t] = (map[t] || 0) + 1;
     });
     const colors = ["#6366f1","#8b5cf6","#a78bfa","#c084fc","#e879f9","#f472b6","#fb7185"];
-    return Object.entries(map).map(([name, value], i) => ({ name, value, color: colors[i % colors.length] })).sort((a,b)=>b.value - a.value).slice(0, 6);
+    return Object.entries(map).map(([name, value], i) => ({ name, value, color: colors[i % colors.length] })).sort((a,b)=>b.value - a.value);
   }, [products]);
 
   const seriesGroupData = useMemo(() => {
@@ -284,7 +284,7 @@ scannedProducts?.forEach(scan => {
       map[s] = (map[s] || 0) + 1;
     });
     const colors = ["#3b82f6","#10b981","#f59e0b","#ef4444","#ec4899","#06b6d4"];
-    return Object.entries(map).map(([name, value], i) => ({ name, value, color: colors[i % colors.length] })).sort((a,b)=>b.value - a.value).slice(0, 6);
+    return Object.entries(map).map(([name, value], i) => ({ name, value, color: colors[i % colors.length] })).sort((a,b)=>b.value - a.value);
   }, [products]);
 
   if (loading && !counts) {
@@ -602,8 +602,9 @@ scannedProducts?.forEach(scan => {
             </CardContent>
           </Card>
 
+        </div>
           {/* Series Wise */}
-          <Card className="border-0 shadow-sm overflow-hidden">
+          <Card className="border-0 shadow-sm overflow-hidden w-[50%]">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Series Distribution</CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">Products grouped by series</p>
@@ -626,7 +627,6 @@ scannedProducts?.forEach(scan => {
               )}
             </CardContent>
           </Card>
-        </div>
       </div>
     </DashboardLayout>
   );

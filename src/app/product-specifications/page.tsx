@@ -5,18 +5,18 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useProducts } from "@/contexts/ProductsContext";
 import { useUser } from "@/contexts/UserContext";
 import { useDynamicFields } from "@/contexts/DynamicFieldsContext";
-import { toast } from "sonner";
+
 import {
     Dialog,
     DialogContent,
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { FileImage, ScanLine, FileText, Eye } from "lucide-react";
+import { FileImage, ScanLine, FileText, Eye, AlertTriangle, XCircle, CheckCircle2, Info } from "lucide-react";
 import { QRScanner, QRScannerHandle } from "@/components/qr-scanner";
 import { fetchFieldImages, getFieldImageUrl, FieldImageRecord } from "@/lib/fieldImageApi";
 import { Card, CardContent } from "@/components/ui/card";
-import { parseScanText } from "@/app/production-verification/parseScanText.js";
+import { parseSpecScanText } from "./parseSpecScanText.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -105,6 +105,17 @@ export default function ProductSpecificationsPage() {
     const scannerRef = useRef<QRScannerHandle>(null);
     const isClosingRef = useRef(false);
     const [fieldImageRecords, setFieldImageRecords] = useState<FieldImageRecord[]>([]);
+    const [alertPopup, setAlertPopup] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        type: "error" | "warning" | "success" | "info";
+    }>({
+        isOpen: false,
+        title: "",
+        message: "",
+        type: "info"
+    });
 
     useEffect(() => {
         const loadImages = async () => {
@@ -129,27 +140,44 @@ export default function ProductSpecificationsPage() {
         );
         if (!matched) {
             setPartInfo(null);
-            toast.error("Product not found");
+            setAlertPopup({
+                isOpen: true,
+                title: "Not Found",
+                message: "Product not found in master data.",
+                type: "error"
+            });
             return;
         }
         if (matched.status?.toLowerCase() !== "active") {
             const prodStatus = (matched as any).approved || 'pending';
             const qualStatus = (matched as any).quality_verified || 'pending';
 
+            let msg = "";
+            let type: "error" | "warning" = "warning";
+            let title = "Product Restricted";
+
             if (prodStatus === 'rejected') {
-                toast.error("Product is rejected by Production");
+                msg = "Product is rejected by Production";
+                type = "error";
             } else if (qualStatus === 'rejected') {
-                toast.error("Product is rejected by Quality");
+                msg = "Product is rejected by Quality";
+                type = "error";
             } else if (prodStatus === 'pending' && qualStatus === 'pending') {
-                toast.warning("Product is not verified by Production and Quality");
+                msg = "Product is not verified by Production and Quality";
             } else if (prodStatus === 'pending') {
-                toast.warning("Product is not approved by Production");
+                msg = "Product is not approved by Production";
             } else if (qualStatus === 'pending') {
-                toast.warning("Product is not verified by Quality");
+                msg = "Product is not verified by Quality";
             } else {
-                toast.warning(`Product status: ${matched.status || 'Pending'}`);
+                msg = `Product status: ${matched.status || 'Pending'}`;
             }
 
+            setAlertPopup({
+                isOpen: true,
+                title,
+                message: msg,
+                type
+            });
             setPartInfo(null);
         } else {
             setPartInfo(matched);
@@ -169,7 +197,7 @@ export default function ProductSpecificationsPage() {
 
     const handleScan = useCallback((decodedText: string) => {
         console.log("DEBUG: Decoded Scan Text:", decodedText);
-        const parsed = parseScanText(decodedText);
+        const parsed = parseSpecScanText(decodedText);
         console.log("DEBUG: Parsed Result:", parsed);
         let partNo = "";
 
@@ -204,7 +232,7 @@ export default function ProductSpecificationsPage() {
     const userColumns = user?.column_array || [];
     const showImage   = user?.show_image === "true";
     const canViewDrawing = user?.document_name_array?.some(d => 
-        ["Drawing_Document", "drawing_DOCUMENT", "drawing", "Drawing"].includes(d)
+        ["Drawing_Document", "drawing_DOCUMENT", "drawing", "Drawing","Drawings"].includes(d)
     );
     const filteredSpecs = ALL_SPECS.filter((s) => userColumns.includes(s.id));
 
@@ -244,11 +272,12 @@ export default function ProductSpecificationsPage() {
                     <input
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                        onKeyDown={(e) => e.key === "Enter" && handleScan(searchTerm)}
                         placeholder="Enter Part Number"
                         style={{
                             flex: "0 0 260px",
                             height: "48px",
+                            width:"180px",
                             border: "3px solid #e53935",
                             borderRadius: "5px",
                             padding: "0 14px",
@@ -268,7 +297,7 @@ export default function ProductSpecificationsPage() {
                             border: "3px solid #e53935",
                             borderRadius: "5px",
                             padding: "0 16px",
-                            fontSize: "20px",
+                            fontSize: "17px",
                             fontWeight: "900",
                             color: "#c62828",
                             background: "#fffde7",
@@ -280,6 +309,32 @@ export default function ProductSpecificationsPage() {
                     >
                         {partInfo?.specification?.partDescription || ""}
                     </div>
+                                                        <div className="  flex justify-center">
+
+                    {canViewDrawing && partInfo && (
+                        (() => {
+                            const docs = parseCategorizedDocs(partInfo.ppap_documents);
+                            const drawingPath = findDrawingPath(docs);
+                            if (!drawingPath) return null;
+                            
+                            return (
+                                <button
+                                    onClick={() => window.open(`${getFileUrl(drawingPath)}#toolbar=0`, "_blank")}
+                                    style={{
+                                        height: "44px", padding: "0 22px",
+                                        background: "#f57c00", color: "#fff",
+                                        border: "2px solid #fb8c00", borderRadius: "5px",
+                                        fontSize: "14px", fontWeight: "800", cursor: "pointer",
+                                        display: "flex", alignItems: "center", gap: "8px",
+                                        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+                                    }}
+                                >
+                                    <FileText className="w-5 h-5" /> Drawing
+                                </button>
+                            );
+                        })()
+                    )}
+                                    </div>
 
                     <button
                         onClick={() => {
@@ -573,33 +628,54 @@ export default function ProductSpecificationsPage() {
                         )}
                     </DialogContent>
                 </Dialog>
-                                    {/* ── VIEW DRAWING BUTTON ── */}
-                                    <div className=" w-full flex justify-center py-10">
 
-                    {canViewDrawing && partInfo && (
-                        (() => {
-                            const docs = parseCategorizedDocs(partInfo.ppap_documents);
-                            const drawingPath = findDrawingPath(docs);
-                            if (!drawingPath) return null;
+                {/* Alert Popup Dialog */}
+                <Dialog open={alertPopup.isOpen} onOpenChange={(o) => setAlertPopup(prev => ({ ...prev, isOpen: o }))}>
+                    <DialogContent className="max-w-md p-0 overflow-hidden border-none shadow-2xl rounded-2xl">
+                        <div className={`p-6 flex flex-col items-center text-center space-y-4 ${
+                            alertPopup.type === 'error' ? 'bg-red-50' : 
+                            alertPopup.type === 'warning' ? 'bg-amber-50' : 
+                            alertPopup.type === 'success' ? 'bg-emerald-50' : 'bg-blue-50'
+                        }`}>
+                            <div className={`p-4 rounded-full ${
+                                alertPopup.type === 'error' ? 'bg-red-100 text-red-600' : 
+                                alertPopup.type === 'warning' ? 'bg-amber-100 text-amber-600' : 
+                                alertPopup.type === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'
+                            }`}>
+                                {alertPopup.type === 'error' && <XCircle className="w-10 h-10" />}
+                                {alertPopup.type === 'warning' && <AlertTriangle className="w-10 h-10" />}
+                                {alertPopup.type === 'success' && <CheckCircle2 className="w-10 h-10" />}
+                                {alertPopup.type === 'info' && <Info className="w-10 h-10" />}
+                            </div>
                             
-                            return (
-                                <button
-                                    onClick={() => window.open(`${getFileUrl(drawingPath)}#toolbar=0`, "_blank")}
-                                    style={{
-                                        height: "44px", padding: "0 22px",
-                                        background: "#f57c00", color: "#fff",
-                                        border: "2px solid #fb8c00", borderRadius: "5px",
-                                        fontSize: "16px", fontWeight: "800", cursor: "pointer",
-                                        display: "flex", alignItems: "center", gap: "8px",
-                                        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-                                    }}
-                                >
-                                    <FileText className="w-5 h-5" /> View Drawing
-                                </button>
-                            );
-                        })()
-                    )}
-                                    </div>
+                            <div className="space-y-2">
+                                <h3 className={`text-xl font-black uppercase tracking-tight ${
+                                    alertPopup.type === 'error' ? 'text-red-700' : 
+                                    alertPopup.type === 'warning' ? 'text-amber-700' : 
+                                    alertPopup.type === 'success' ? 'text-emerald-700' : 'text-blue-700'
+                                }`}>
+                                    {alertPopup.title}
+                                </h3>
+                                <p className="text-slate-600 font-bold leading-relaxed px-4">
+                                    {alertPopup.message}
+                                </p>
+                            </div>
+
+                            <button
+                                onClick={() => setAlertPopup(prev => ({ ...prev, isOpen: false }))}
+                                className={`w-full py-3 rounded-xl font-black text-white shadow-lg transition-all active:scale-95 ${
+                                    alertPopup.type === 'error' ? 'bg-red-500 hover:bg-red-600 shadow-red-200' : 
+                                    alertPopup.type === 'warning' ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-200' : 
+                                    alertPopup.type === 'success' ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-200' : 'bg-blue-500 hover:bg-blue-600 shadow-blue-200'
+                                }`}
+                            >
+                                GOT IT
+                            </button>
+                        </div>
+                    </DialogContent>
+                </Dialog>
+                                    {/* ── VIEW DRAWING BUTTON ── */}
+
             </div>
         </DashboardLayout>
     );

@@ -169,7 +169,7 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
 
   const updateRemarks = async (id: number, remarks: string) => {
     try {
-      const response = await api.patch<ApiResponse<ScannedProduct>>(`/scanned-products/${id}/remarks`, { remarks });
+      const response = await api.patch<ApiResponse<ScannedProduct>>(`/scanned-products/${id}/remarks`, { admin_remarks: remarks });
       if (response.data.success) {
         toast.success("Remarks updated successfully");
         await fetchScannedProducts(); 

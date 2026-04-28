@@ -84,6 +84,7 @@ export interface ScannedProduct {
   product_type: string;
   validation_status: 'pass' | 'fail' | 'pending';
   remarks: string;
+  admin_remarks: string | null | undefined;
   part_sl_no: string | null;
   sl_no?: string | number;
   scanned_text: string;
