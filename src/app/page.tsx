@@ -34,6 +34,7 @@ import {
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useScannedProducts } from "@/contexts/ScannedProductsContext";
 import { useProducts } from "@/contexts/ProductsContext";
+import { parseScanText } from "./production-verification/parseScanText";
 
 const statusColors: Record<string, string> = {
   pass: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -54,6 +55,14 @@ export default function DashboardPage() {
     return new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
   }, []);
 
+
+        const productsForGraphs = useMemo(() => {
+          return scannedProducts.filter(s => {
+              const parsed = parseScanText(s.scanned_text || "");
+              if (!parsed) return true; // keep if unknown or unparseable (safe default)
+              return parsed.format !== 'F1' && parsed.format !== 'F5';
+          });
+      }, [scannedProducts]);
   // 1. Dynamic Stats Cards
   const stats = useMemo(() => [
     {
@@ -94,14 +103,14 @@ export default function DashboardPage() {
     },
     {
       title: "Production Checks This Month",
-      value: (scannedProducts?.length ?? 0).toLocaleString(),
+      value: (productsForGraphs?.length ?? 0).toLocaleString(),
       change: "+0%",
       trend: "up",
       icon: ClipboardCheck,
       bgLight: "bg-violet-50",
       textColor: "text-violet-600",
     },
-  ], [counts, scannedProducts]);
+  ], [counts, productsForGraphs]);
 
   // 2. Approval Statistics (Pie Chart)
   const approvalStats = useMemo(() => {
@@ -135,7 +144,7 @@ if (now.getHours() < 6) {
 const end = new Date(start);
 end.setDate(end.getDate() + 1);
 
-scannedProducts?.forEach(scan => {
+productsForGraphs?.forEach(scan => {
 const raw = scan.created_at;
 
 // Remove UTC interpretation
@@ -155,7 +164,9 @@ const date = new Date(raw.replace("Z", ""));
 
 
     return buckets;
-  }, [scannedProducts]);
+  }, [productsForGraphs]);
+
+
 
   // 4. Weekly Scanning Performance
   const weeklyPerformance = useMemo(() => {
@@ -177,7 +188,7 @@ firstDayOfWeek.setHours(0,0,0,0);
 const lastDayOfWeek = new Date(firstDayOfWeek);
 lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 7);
 
-scannedProducts?.forEach(scan => {
+productsForGraphs?.forEach(scan => {
   const date = new Date(scan.created_at);
 
   if (date >= firstDayOfWeek && date < lastDayOfWeek) {
@@ -193,7 +204,7 @@ scannedProducts?.forEach(scan => {
 
 
     return orderedWeekData;
-  }, [scannedProducts]);
+  }, [productsForGraphs]);
 
   // 5. Monthly Trend
   const verificationTrend = useMemo(() => {

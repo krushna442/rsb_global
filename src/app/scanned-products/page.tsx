@@ -45,6 +45,7 @@ import {
 } from "recharts";
 import * as XLSX from "xlsx";
 import { Badge } from "@/components/ui/badge";
+import { parseScanText } from "../production-verification/parseScanText.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -159,6 +160,14 @@ export default function ScannedProductsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dateFilter, fromDate, toDate, searchQuery]);
 
+        const productsForGraphs = useMemo(() => {
+        return scannedProducts.filter(s => {
+            const parsed = parseScanText(s.scanned_text || "");
+            if (!parsed) return true; // keep if unknown or unparseable (safe default)
+            return parsed.format !== 'F1' && parsed.format !== 'F5';
+        });
+    }, [scannedProducts]);
+
     // ── NEW: Client-side status filter (approved / rejected / all) ───────────
     const filteredProducts = useMemo(() => {
         if (statusFilter === "approved") return scannedProducts.filter((s) => !s.is_rejected);
@@ -180,7 +189,7 @@ export default function ScannedProductsPage() {
     // ── NEW: Rejection field breakdown (mismatched_fields frequency) ─────────
     const rejectionFieldData = useMemo(() => {
         const map: Record<string, number> = {};
-        scannedProducts
+        productsForGraphs
             .filter((s) => !!s.is_rejected)
             .forEach((s) => {
                 (s.mismatched_fields || []).forEach((field: string) => {
@@ -239,14 +248,23 @@ export default function ScannedProductsPage() {
         fontSize: 12,
     };
 
+    // Filtered data for graphs: Ignore F1 and F5
+
+
     const pieData = useMemo(() => {
-        if (!scanStats) return [];
+        if (!productsForGraphs.length) return [];
+        
+        const pass = productsForGraphs.filter(s => s.validation_status === 'pass').length;
+        const rejected = productsForGraphs.filter(s => s.is_rejected).length;
+        const total = productsForGraphs.length;
+        const pending = Math.max(0, total - pass - rejected);
+
         return [
-            { name: "Passed",   value: scanStats.pass,    color: "#10b981" },
-            { name: "Rejected", value: scanStats.rejected, color: "#ef4444" },
-            { name: "Pending",  value: Math.max(0, scanStats.total - scanStats.pass - scanStats.rejected), color: "#f59e0b" },
+            { name: "Passed",   value: pass,    color: "#10b981" },
+            { name: "Rejected", value: rejected, color: "#ef4444" },
+            { name: "Pending",  value: pending, color: "#f59e0b" },
         ].filter((d) => d.value > 0);
-    }, [scanStats]);
+    }, [productsForGraphs]);
   const hourlyLogs = useMemo(() => {
     const hours = [
       "6 AM", "7 AM", "8 AM", "9 AM", "10 AM", "11 AM", "12 PM", "1 PM",
@@ -266,7 +284,7 @@ if (now.getHours() < 6) {
 const end = new Date(start);
 end.setDate(end.getDate() + 1);
 
-scannedProducts?.forEach(scan => {
+productsForGraphs?.forEach(scan => {
 const raw = scan.created_at;
 
 // Remove UTC interpretation
@@ -291,7 +309,7 @@ const date = new Date(raw.replace("Z", ""));
 
     const customerData = useMemo(() => {
         const map: Record<string, number> = {};
-        scannedProducts.forEach((s) => { const n = s.customer_name || "Unknown"; map[n] = (map[n] || 0) + 1; });
+        productsForGraphs.forEach((s) => { const n = s.customer_name || "Unknown"; map[n] = (map[n] || 0) + 1; });
         return Object.entries(map)
             .map(([name, count]) => ({ name: name.length > 14 ? name.slice(0, 14) + "…" : name, fullName: name, count }))
             .sort((a, b) => b.count - a.count).slice(0, 8);
@@ -299,20 +317,20 @@ const date = new Date(raw.replace("Z", ""));
 
     const seriesData = useMemo(() => {
         const map: Record<string, number> = {};
-        scannedProducts.forEach((s) => { const series = s.scanned_specification?.series || "N/A"; map[series] = (map[series] || 0) + 1; });
+        productsForGraphs.forEach((s) => { const series = s.scanned_specification?.series || "N/A"; map[series] = (map[series] || 0) + 1; });
         return Object.entries(map).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 10);
     }, [scannedProducts]);
 
     const productTypeData = useMemo(() => {
         const map: Record<string, number> = {};
-        scannedProducts.forEach((s) => { const t = (s.product_type || "Unknown").toUpperCase(); map[t] = (map[t] || 0) + 1; });
+        productsForGraphs.forEach((s) => { const t = (s.product_type || "Unknown").toUpperCase(); map[t] = (map[t] || 0) + 1; });
         const colors = ["#6366f1","#8b5cf6","#a78bfa","#c084fc","#e879f9","#f472b6","#fb7185"];
         return Object.entries(map).map(([name, value], i) => ({ name, value, color: colors[i % colors.length] })).sort((a, b) => b.value - a.value);
     }, [scannedProducts]);
 
     const shiftData = useMemo(() => {
         const map: Record<string, number> = {};
-        scannedProducts.forEach((s) => { const sh = s.shift || "N/A"; map[sh] = (map[sh] || 0) + 1; });
+        productsForGraphs.forEach((s) => { const sh = s.shift || "N/A"; map[sh] = (map[sh] || 0) + 1; });
         const colors: Record<string, string> = { A: "#3b82f6", B: "#f59e0b", C: "#10b981" };
         return Object.entries(map)
             .map(([name, value]) => ({ name: `Shift ${name}`, value, fill: colors[name] || "#94a3b8" }))
@@ -321,7 +339,7 @@ const date = new Date(raw.replace("Z", ""));
 
     const acceptRejectByType = useMemo(() => {
         const map: Record<string, { accepted: number; rejected: number }> = {};
-        scannedProducts.forEach((s) => {
+        productsForGraphs.forEach((s) => {
             const t = (s.product_type || "Unknown").toUpperCase();
             if (!map[t]) map[t] = { accepted: 0, rejected: 0 };
             s.is_rejected ? map[t].rejected++ : map[t].accepted++;
@@ -330,15 +348,15 @@ const date = new Date(raw.replace("Z", ""));
     }, [scannedProducts]);
 
     const partVolumeData = useMemo(() => {
-        if (!scannedProducts.length) return [];
+        if (!productsForGraphs.length) return [];
         
         const map: Record<string, number> = {};
-        scannedProducts.forEach((s) => {
+        productsForGraphs.forEach((s) => {
             const pn = s.part_no || "Unknown";
             map[pn] = (map[pn] || 0) + 1;
         });
 
-        const total = scannedProducts.length;
+        const total = productsForGraphs.length;
         
         const highParts: {pn: string, count: number}[] = [];
         const mediumParts: {pn: string, count: number}[] = [];

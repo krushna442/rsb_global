@@ -19,7 +19,9 @@ import {
     ChevronRight,
     Sliders,
     BarChart3,
-    Notebook
+    Notebook,
+    Truck,
+    BrainCircuit
 } from "lucide-react";
 import { useState } from "react";
 import { useUser } from "@/contexts/UserContext";
@@ -32,7 +34,13 @@ const menuItems = [
     { label: "Product Scanning", icon: ClipboardCheck, href: "/production-verification" },
     { label: "Quality Approval", icon: ShieldCheck, href: "/quality-verification" },
     { label: "Documents", icon: FileText, href: "/documents" },
+    { label: "Drawings", icon: FileText, href: "/drawings" },
+    { label: "Standards", icon: FileText, href: "/standards" },
     { label: "Control Plan", icon: ListChecks, href: "/control-plan" },
+    { label: "Bearing Cup Plan", icon: Factory, href: "/bearing-cup-plan" },
+    { label: "Hourly Production", icon: Factory, href: "/hourly-production" },
+    { label: "Despatch Plan", icon: Truck, href: "/despatch-plan" },
+    { label: "Skill Matrix", icon: BrainCircuit, href: "/skill-matrix" },
     { label: "Product Specifications", icon: ClipboardCheck, href: "/product-specifications" },
     { label: "Dynamic Fields", icon: Sliders, href: "/dynamic-fields" },
     { label: "Scanned Products", icon: BarChart3, href: "/scanned-products" },

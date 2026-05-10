@@ -226,7 +226,7 @@ const focusScanInput = useCallback(() => {
             vendorCode:     matchedProduct.specification?.vendorCode || "N/A",
             scanned_specification: {
                 tubeDiameter:   formTubeDia,
-                tubeLength:     Number(formTubeLength) || 0,
+                tubeLength:   formTubeLength,
                 series:         formJointType,
                 cFlangeOrient:  formCFlangeOrientation,
                 flangeYoke:     formFlangeYoke,
@@ -255,7 +255,13 @@ const focusScanInput = useCallback(() => {
                     if (key) mismatches.add(key);
                 });
             }
+            
             setMismatchedFields(mismatches);
+            if(result.validation_status === "fail"){
+                // alert message scan failed
+                window.confirm(`Scan Failed : Mismatch found in the scanned product`);
+                  
+            }
             handleClearlabeltext();
         }
         focusScanInput();

@@ -1,7 +1,7 @@
 export const ALL_ROUTES = [
     "/",
     "/product-master",
-    "/approvals", // Production Approval
+    "/approvals",
     "/production-verification",
     "/quality-verification",
     "/documents",
@@ -10,7 +10,14 @@ export const ALL_ROUTES = [
     "/scanned-products",
     "/users",
     "/settings",
-    "/pdi-partreport"
+    "/pdi-partreport",
+    "/control-plan",
+    "/drawings",
+    "/standards",
+    "/bearing-cup-plan",
+    "/hourly-production",
+    "/despatch-plan",
+    "/skill-matrix",
 ];
 
 export const ROLE_ACCESS: Record<string, string[]> = {
@@ -26,8 +33,14 @@ export const ROLE_ACCESS: Record<string, string[]> = {
         "/scanned-products",
         "/users",
         "/settings",
-            "/pdi-partreport"
-
+        "/pdi-partreport",
+        "/control-plan",
+        "/drawings",
+        "/standards",
+        "/bearing-cup-plan",
+        "/hourly-production",
+        "/despatch-plan",
+        "/skill-matrix",
     ],
     
     "production": [
@@ -39,8 +52,14 @@ export const ROLE_ACCESS: Record<string, string[]> = {
         "/product-specifications",
         "/scanned-products",
         "/settings",
-            "/pdi-partreport"
-
+        "/pdi-partreport",
+        "/control-plan",
+        "/drawings",
+        "/standards",
+        "/bearing-cup-plan",
+        "/hourly-production",
+        "/despatch-plan",
+        "/skill-matrix",
     ],
     
     "quality": [
@@ -52,8 +71,14 @@ export const ROLE_ACCESS: Record<string, string[]> = {
         "/product-specifications",
         "/scanned-products",
         "/settings",
-            "/pdi-partreport"
-
+        "/pdi-partreport",
+        "/control-plan",
+        "/drawings",
+        "/standards",
+        "/bearing-cup-plan",
+        "/hourly-production",
+        "/despatch-plan",
+        "/skill-matrix",
     ],
     
     "viewer": [
@@ -63,10 +88,17 @@ export const ROLE_ACCESS: Record<string, string[]> = {
         "/product-specifications",
         "/scanned-products",
         "/settings",
-            "/pdi-partreport"
-
+        "/pdi-partreport",
+        "/control-plan",
+        "/drawings",
+        "/standards",
+        "/bearing-cup-plan",
+        "/hourly-production",
+        "/despatch-plan",
+        "/skill-matrix",
     ]
 };
+
 
 /**
  * Validates if the given role has access to the specified pathname.

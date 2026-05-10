@@ -88,7 +88,7 @@ const ALL_SPECS = [
     { id: "Mod_No",                   label: "Mod No",                         valueKey: "revNo"                 },
     { id: "Vendor_Code",              label: "Vendor code",                    valueKey: "vendorCode"                   },
     { id: "Customer_Name",            label: "Customer Name",                  valueKey: "customer"                     },
-    { id: "DWG_Weight",               label: "DWG Weight/Mod Date",            valueKey: "partWeight"                   },
+    { id: "DWG_Weight",               label: "DWG Weight",            valueKey: "partWeight"                   },
 ];
 
 export default function ProductSpecificationsPage() {

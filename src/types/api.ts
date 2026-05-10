@@ -15,6 +15,9 @@ export interface DynamicFieldsData {
   quality_verification_fields: string[];
   important_fields: string[];
   documents: DocumentField[];
+  customer_names: string[];
+standard_names: string[];
+control_plan_names: string[];
   updated_at: string;
 }
 

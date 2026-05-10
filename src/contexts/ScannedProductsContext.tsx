@@ -23,12 +23,14 @@ interface FetchScannedOptions {
 
 interface ScannedProductsContextType {
   scannedProducts: ScannedProduct[];
+  todayScannedProducts: ScannedProduct[];
   dailySummary: ScannedProduct[];
   scanStats: { total: number; pass: number; rejected: number } | null;
   meta: ApiResponse<any>['meta'] | undefined;
   loading: boolean;
   error: string | null;
   fetchScannedProducts: (options?: FetchScannedOptions) => Promise<void>;
+  fetchTodayScannedProducts: () => Promise<void>;
   fetchDailySummary: (date: string) => Promise<void>;
   fetchScanStats: (options?: FetchScannedOptions) => Promise<void>;
   getScanById: (id: number) => Promise<ScannedProduct | null>;
@@ -81,6 +83,23 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const fetchTodayScannedProducts = useCallback(async () => {
+    try {
+      const now = new Date();
+      // IST is UTC+5.5. If current time is < 6AM, we want previous day's record.
+      const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+      if (ist.getUTCHours() < 6) ist.setUTCDate(ist.getUTCDate() - 1);
+      const dateStr = ist.toISOString().slice(0, 10);
+
+      const response = await api.get<ApiResponse<ScannedProduct[]>>(`/scanned-products?dispatch_date=${dateStr}&limit=9999`);
+      if (response.data.success && response.data.data) {
+        setTodayScannedProducts(response.data.data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch today's scanned products", err);
     }
   }, []);
 
@@ -208,18 +227,21 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
 useEffect(() => {
   fetchScannedProducts({ this_month: true, limit: 9999 });
   fetchScanStats({ this_month: true });
-}, [fetchScannedProducts, fetchScanStats]);
+  fetchTodayScannedProducts();
+}, [fetchScannedProducts, fetchScanStats, fetchTodayScannedProducts]);
 
   return (
     <ScannedProductsContext.Provider
       value={{
         scannedProducts,
+        todayScannedProducts,
         dailySummary,
         scanStats,
         meta,
         loading,
         error,
         fetchScannedProducts,
+        fetchTodayScannedProducts,
         fetchDailySummary,
         fetchScanStats,
         getScanById,
