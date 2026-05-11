@@ -119,6 +119,7 @@ export interface User {
   menu_array: string[];
   document_name_array: string[];
   mail_types: string[];   // or MailType[] if you import it here
+  nav_array: string[];
 
   profile_image: string | null;
   is_active: number | boolean;

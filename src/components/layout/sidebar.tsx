@@ -77,6 +77,22 @@ export function Sidebar() {
                         return null;
                     }
 
+                    // For non-admin users, filter by nav_array
+                    const isAdmin = user?.role === 'admin' || user?.role === 'super admin';
+                    if (!isAdmin) {
+                        let allowedNavs: string[] = [];
+                        try {
+                            allowedNavs = Array.isArray(user?.nav_array) 
+                                ? user.nav_array 
+                                : JSON.parse(user?.nav_array as any || "[]");
+                        } catch (e) {
+                            allowedNavs = [];
+                        }
+                        if (!allowedNavs.includes(item.label)) {
+                            return null;
+                        }
+                    }
+
                     const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
                     return (
                         <Link

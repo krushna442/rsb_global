@@ -25,6 +25,19 @@ const API_BASE = process.env.NEXT_PUBLIC_URL || "";
 const getFileUrl = (p: string) => p?.startsWith("http") ? p : `${API_BASE}/${p?.replace(/\\/g, "/")}`;
 const fmtDate = (d: string | null) => !d ? "—" : new Date(d).toLocaleDateString("en-IN");
 
+const getCustomerPrefix = (customer: string | null) => {
+  if (!customer) return "";
+  const c = customer.toUpperCase();
+  if (c.includes("ALL ALW")) return "A";
+  if (c.includes("ALL PNR")) return "P";
+  if (c.includes("ALL HUSUR") || c.includes("ALL HOSUR")) return "H";
+  if (c.includes("IPLT")) return "I";
+  if (c.includes("SWITCH MOBILITY")) return "S";
+  if (c.includes("TML")) return "T";
+  if (c.includes("VECV")) return "V";
+  return "";
+};
+
 const TAB_COLORS = [
   { active: "bg-blue-600 text-white border-blue-600", inactive: "text-blue-700 border-blue-200 hover:bg-blue-50" },
   { active: "bg-emerald-600 text-white border-emerald-600", inactive: "text-emerald-700 border-emerald-200 hover:bg-emerald-50" },
@@ -277,12 +290,17 @@ function VersionsModal({ drawingId, onClose }: { drawingId: number | null; onClo
 }
 
 // ── Export to CSV ─────────────────────────────────────────────────────────────
-function exportCSV(data: Drawing[], customer: string) {
-  const headers = ["SR No.", "Drawing Number", "Description", "Joint", "Part Number(s)", "Customer", "Mod Number", "Mod Date",  "Version"];
+function exportCSV(data: (Drawing & { slNo?: string })[], customer: string) {
+  const headers = ["Sl No.", "Drawing Number", "Description", "Joint", "Part Number(s)", "Customer", "Mod Number", "Mod Date"];
   const rows = data.map((d, i) => [
-    i + 1, d.drawing_number, d.shaft || "", d.joint || "", d.part_number || "",
-    d.customer || "", d.modification_number || "", fmtDate(d.modification_date),
-    d.file_path ? getFileUrl(d.file_path) : "", d.bom ? getFileUrl(d.bom) : "", d.version
+    d.slNo || (i + 1).toString(),
+    d.drawing_number,
+    d.shaft || "",
+    d.joint || "",
+    d.part_number || "",
+    d.customer || "",
+    d.modification_number || "",
+    fmtDate(d.modification_date)
   ]);
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -356,6 +374,20 @@ export default function DrawingsPage() {
     });
   }, [drawings, search, activeTab]);
 
+  const filteredWithSlNo = useMemo(() => {
+    const counts: Record<string, number> = {};
+    return filtered.map(d => {
+      const customer = d.customer || "Unknown";
+      const prefix = getCustomerPrefix(customer);
+      let slNo = "";
+      if (prefix) {
+        counts[customer] = (counts[customer] || 0) + 1;
+        slNo = `${prefix}${counts[customer]}`;
+      }
+      return { ...d, slNo };
+    });
+  }, [filtered]);
+
   const tabs = useMemo(() => {
     const fromData = Array.from(new Set(drawings.map(d => d.customer || "Unknown")));
     const ordered = customerNames.length > 0
@@ -384,7 +416,7 @@ export default function DrawingsPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input placeholder="Search part no. or description..." className="pl-9 h-9 w-64 text-sm" value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5" onClick={() => exportCSV(filtered, activeTab)}>
+            <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5" onClick={() => exportCSV(filteredWithSlNo, activeTab)}>
               <Download className="w-3.5 h-3.5" />Export CSV
             </Button>
             {isAdmin && <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5" onClick={() => setIsAddCustomerOpen(true)}><Plus className="w-3.5 h-3.5" />Add Customer</Button>}
@@ -435,9 +467,9 @@ export default function DrawingsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((d, i) => (
+                  {filteredWithSlNo.map((d, i) => (
                     <tr key={d.id} className={`border-b transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/20"} hover:bg-blue-50/40`}>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{i + 1}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{d.slNo || (i + 1)}</td>
                       <td className="px-4 py-3 font-mono text-xs font-semibold">{d.drawing_number}</td>
                       <td className="px-4 py-3 text-xs max-w-[140px] truncate">{d.shaft || "—"}</td>
                       <td className="px-4 py-3 text-xs">{d.joint || "—"}</td>

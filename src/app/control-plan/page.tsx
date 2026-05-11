@@ -21,6 +21,7 @@ function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
   const [uploading, setUploading] = useState(false);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [progress, setProgress] = useState(0);
   const [playing, setPlaying] = useState<any | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -35,15 +36,44 @@ function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
   const handleUpload = async () => {
     if (!title.trim() || !file) return toast.error("Title and video file are required");
     setUploading(true);
+    setProgress(0);
+
+    const chunkSize = 5 * 1024 * 1024; // 5MB chunks
+    const totalChunks = Math.ceil(file.size / chunkSize);
+    const uploadId = Date.now().toString() + Math.random().toString(36).substring(2);
+
     try {
-      const fd = new FormData();
-      fd.append("title", title.trim());
-      fd.append("video", file);
-      await api.post("/sop-videos", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      toast.success("Video uploaded"); setTitle(""); setFile(null);
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, file.size);
+        const chunk = file.slice(start, end);
+
+        const fd = new FormData();
+        fd.append("uploadId", uploadId);
+        fd.append("chunkIndex", i.toString());
+        fd.append("totalChunks", totalChunks.toString());
+        fd.append("title", title.trim());
+        fd.append("fileName", file.name);
+        fd.append("mimeType", file.type);
+        fd.append("chunk", chunk);
+
+        await api.post(`/sop-videos/chunk?uploadId=${uploadId}&chunkIndex=${i}`, fd, { 
+          headers: { "Content-Type": "multipart/form-data" }
+        });
+
+        setProgress(Math.round(((i + 1) / totalChunks) * 100));
+      }
+
+      toast.success("Video uploaded"); 
+      setTitle(""); 
+      setFile(null);
+      setProgress(0);
       if (fileRef.current) fileRef.current.value = "";
       load();
-    } catch (e: any) { toast.error(e.response?.data?.message || "Upload failed"); }
+    } catch (e: any) { 
+      toast.error(e.response?.data?.message || "Upload failed"); 
+      setProgress(0);
+    }
     finally { setUploading(false); }
   };
 
@@ -67,8 +97,14 @@ function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
             <Button variant="outline" size="sm" className="h-9" onClick={() => fileRef.current?.click()}>
               <Upload className="w-3.5 h-3.5 mr-1.5" />{file ? file.name.slice(0, 20) + "..." : "Choose Video"}
             </Button>
-            <Button size="sm" className="h-9 gap-1.5" onClick={handleUpload} disabled={uploading}>
-              {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Upload
+            <Button size="sm" className="h-9 gap-1.5 min-w-[100px] relative overflow-hidden" onClick={handleUpload} disabled={uploading}>
+              {uploading && (
+                <div className="absolute left-0 top-0 bottom-0 bg-black/20 transition-all duration-300" style={{ width: `${progress}%` }} />
+              )}
+              <span className="relative z-10 flex items-center gap-1.5">
+                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {uploading ? `${progress}%` : "Upload"}
+              </span>
             </Button>
           </div>
         </div>

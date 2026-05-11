@@ -85,6 +85,13 @@ const allColumns = [
     "Rear_Slip", "Mod_No", "Vendor_Code", "Customer_Name", "DWG_Weight"
 ];
 
+const allNavs = [
+  'Dashboard', 'Product Master', 'Production Approval', 'Product Scanning', 'Quality Approval', 
+  'Documents', 'Drawings', 'Standards', 'Control Plan', 'Bearing Cup Plan', 'Hourly Production', 
+  'Despatch Plan', 'Skill Matrix', 'Product Specifications', 'Dynamic Fields', 'Scanned Products', 
+  'PDI Report', 'Users', 'Settings'
+];
+
 export default function UsersPage() {
     const { allUsers, fetchAllUsers, updateProfile, deactivateUser, deleteUser , addMailTypes, removeMailTypes} = useUser();
     const {data} = useDynamicFields();
@@ -103,6 +110,7 @@ export default function UsersPage() {
     const [columnArray, setColumnArray] = useState<string[]>(allColumns);
     const [menuArray, setMenuArray] = useState<string[]>([]);
     const [documentArray, setDocumentArray] = useState<string[]>([]);
+    const [navArray, setNavArray] = useState<string[]>(allNavs);
 
     const allMenus = ["Engineering", "BOM Dashboard", "Quality", "Production"];
     const allDocs = data?.documents.map((doc) => doc.name) || [];
@@ -151,6 +159,7 @@ const handleCheckboxToggle = <T extends string>(
         setColumnArray(allColumns);
         setMenuArray([]);
         setDocumentArray([]);
+        setNavArray(allNavs);
         setMailTypesArray([]);  
 
         setOpen(true);
@@ -171,6 +180,7 @@ const handleCheckboxToggle = <T extends string>(
         setColumnArray(user.column_array || []);
         setMenuArray(user.menu_array || []);
         setDocumentArray(user.document_name_array || []);
+        setNavArray(user.nav_array || []);
         setMailTypesArray(
         (user.mail_types || []).filter((type): type is MailType =>
         MAIL_TYPES.includes(type as MailType)
@@ -197,6 +207,7 @@ const handleCheckboxToggle = <T extends string>(
                 column_array: columnArray,
                 menu_array: menuArray,
                 document_name_array: documentArray,
+                nav_array: navArray,
                 mail_types: mailTypesArray,   // 👈 add this
 
                 is_active: 1
@@ -287,7 +298,30 @@ const handleCheckboxToggle = <T extends string>(
       </div>
 
       {/* Access Matrix Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[400px]">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 h-[400px]">
+
+        {/* Nav Access Table */}
+        <div className="border rounded-md shadow-sm bg-white flex flex-col h-full overflow-hidden">
+          <div className="grid grid-cols-[60px_1fr] bg-slate-100 border-b p-2 font-semibold text-xs text-muted-foreground shrink-0">
+            <div>Select</div>
+            <div>Nav Menu</div>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {allNavs.map((nav, idx) => (
+              <div key={nav} className={`grid grid-cols-[60px_1fr] p-2 text-sm items-center border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                <div className="pl-1">
+                  <Checkbox
+                    checked={navArray.includes(nav)}
+                    onCheckedChange={(checked) => handleCheckboxToggle(navArray, setNavArray, nav, checked as boolean)}
+                    disabled={modalMode === "view"}
+                    className="h-4 w-4 bg-white border-muted-foreground/30 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 data-[state=checked]:text-white disabled:opacity-50"
+                  />
+                </div>
+                <div className="text-muted-foreground text-xs">{nav}</div>
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* Column Name Access Table */}
         <div className="lg:col-span-3 border rounded-md shadow-sm bg-white flex flex-col h-full overflow-hidden">

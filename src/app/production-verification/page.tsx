@@ -39,18 +39,29 @@ fetchDailySummary(today);    // fetchScannedProducts is stable (useCallback), ru
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // ── Client-side pagination ───────────────────────────────────────────────
+    // ── Client-side pagination & Search ──────────────────────────────────────────
     const [currentPage, setCurrentPage] = useState(1);
+    const [search, setSearch] = useState("");
 
-    const totalPages = Math.max(1, Math.ceil(dailySummary.length / PAGE_SIZE));
+    const filteredRecords = useMemo(() => {
+        const q = search.toLowerCase().trim();
+        if (!q) return dailySummary;
+        return dailySummary.filter(r => 
+            (r.part_no || "").toLowerCase().includes(q) ||
+            (r.customer_name || "").toLowerCase().includes(q) ||
+            (r.part_sl_no || "").toLowerCase().includes(q)
+        );
+    }, [dailySummary, search]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredRecords.length / PAGE_SIZE));
 
     const pagedRecords = useMemo(() => {
         const start = (currentPage - 1) * PAGE_SIZE;
-        return dailySummary.slice(start, start + PAGE_SIZE);
-    }, [dailySummary, currentPage]);
+        return filteredRecords.slice(start, start + PAGE_SIZE);
+    }, [filteredRecords, currentPage]);
 
-    const rangeStart = dailySummary.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-    const rangeEnd   = Math.min(currentPage * PAGE_SIZE, dailySummary.length);
+    const rangeStart = filteredRecords.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+    const rangeEnd   = Math.min(currentPage * PAGE_SIZE, filteredRecords.length);
 
     // ── Scanner ───────────────────────────────────────────────────────────────
     const [isScannerOpen, setIsScannerOpen]   = useState(false);
@@ -273,6 +284,7 @@ const focusScanInput = useCallback(() => {
         products, partSlNo, plant, recordScan,
         formCustomer, formProductType, formTubeDia, formTubeLength,
         formJointType, formCFlangeOrientation, formFlangeYoke, formCouplingFlange,
+        focusScanInput
     ]);
 
     const detailCls = (key: string) =>
@@ -449,7 +461,15 @@ const focusScanInput = useCallback(() => {
                     <div className="flex flex-wrap items-center justify-end mb-4 gap-4">
                         <div className="flex items-center gap-2 relative">
                             <Search className="w-3 h-3 absolute left-2 text-muted-foreground" />
-                            <Input placeholder="Search..." className="h-8 w-[200px] text-xs pl-7" />
+                            <Input 
+                                placeholder="Search part number..." 
+                                className="h-8 w-[200px] text-xs pl-7" 
+                                value={search}
+                                onChange={e => {
+                                    setSearch(e.target.value);
+                                    setCurrentPage(1); // Reset to page 1 on search
+                                }}
+                            />
                         </div>
                     </div>
 
@@ -503,11 +523,10 @@ const focusScanInput = useCallback(() => {
                         </table>
                     </div>
 
-                    {/* ── Pagination (client-side — zero API calls on page change) ── */}
-                    {dailySummary.length > PAGE_SIZE && (
+                    {filteredRecords.length > PAGE_SIZE && (
                         <div className="flex items-center justify-between mt-4">
                             <p className="text-xs text-muted-foreground">
-                                Showing {rangeStart}–{rangeEnd} of {dailySummary.length} records
+                                Showing {rangeStart}–{rangeEnd} of {filteredRecords.length} records
                             </p>
                             <div className="flex items-center gap-1">
                                 <Button

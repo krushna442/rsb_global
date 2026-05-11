@@ -254,29 +254,18 @@ function PlanTable({ vehicles }: { vehicles: Vehicle[] }) {
   );
 }
 
-// ── Incomplete from Previous Day Banner ───────────────────────────────────────
 function IncompleteBanner({ vehicles }: { vehicles: any[] }) {
   if (!vehicles.length) return null;
   return (
-    <div className="border-2 border-yellow-400 bg-yellow-50 rounded-xl p-4">
-      <div className="flex items-center gap-2 mb-3">
+    <div className="border border-yellow-300 bg-yellow-50 rounded-xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2 p-4 bg-yellow-100 border-b border-yellow-200">
         <AlertTriangle className="w-5 h-5 text-yellow-600" />
-        <span className="font-semibold text-yellow-800 text-sm">Incomplete Vehicles from Previous Day</span>
+        <span className="font-bold text-yellow-800 text-sm">Pending Despatches (Previous Day)</span>
       </div>
-      <div className="flex gap-3 flex-wrap">
-        {vehicles.map((v: any) => (
-          <div key={v.id} className="bg-yellow-100 border border-yellow-300 rounded-lg px-3 py-2 text-xs">
-            <div className="font-bold text-yellow-800">{v.vehicle_label} — {v.customer || "No customer"}</div>
-            {v.pallets?.map((p: any) => (
-              <div key={p.id} className="text-yellow-700">{p.pallet_label} | Target: {p.target_qty} | Scanned: {p.scanned_qty}</div>
-            ))}
-          </div>
-        ))}
-      </div>
+      <PlanTable vehicles={vehicles} />
     </div>
   );
 }
-
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function DespatchPlanPage() {
   const { user } = useUser();
@@ -294,6 +283,7 @@ export default function DespatchPlanPage() {
   const [exporting, setExporting] = useState(false);
   const [customerOptions, setCustomerOptions] = useState<string[]>([]);
   const [planExists, setPlanExists] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Download Matrix Template
@@ -316,11 +306,10 @@ export default function DespatchPlanPage() {
     worksheet.getRow(2).font = { bold: true };
     worksheet.getColumn(1).width = 20;
     worksheet.getColumn(2).width = 15;
-    worksheet.getColumn(3).width = 12;
 
     // Dropdowns for Customers in Row 2
     for (let i = 0; i < 6; i++) {
-      const colIdx = 4 + (i * 2);
+      const colIdx = 3 + (i * 2);
       const cell = worksheet.getRow(2).getCell(colIdx);
       cell.dataValidation = {
         type: 'list',
@@ -333,8 +322,8 @@ export default function DespatchPlanPage() {
 
     // Sample Data
     const samples = [
-      ['FC327100', '1329', 'REGULAR', 10, 'P1'],
-      ['FEA55700', '1100', 'SAMPLE', 5, 'P2'],
+      ['FC327100', '1329', 10, 'P1'],
+      ['FEA55700', '1100', 5, 'P2'],
     ];
     samples.forEach(s => worksheet.addRow(s));
 
@@ -368,6 +357,7 @@ export default function DespatchPlanPage() {
         })));
       } else {
         setPlanExists(false);
+        setIsEditing(false);
         setVehicles([makeEmptyVehicle("V1")]);
       }
     } catch { toast.error("Failed to load plan"); }
@@ -391,7 +381,7 @@ export default function DespatchPlanPage() {
   }, [todayScannedProducts]);
 
   const displayedVehicles = useMemo(() => {
-    if (!planExists) return vehicles;
+    if (!planExists || isEditing) return vehicles;
 
     // Build a map of remaining scan quantities
     const remainingScans = { ...aggregatedScans };
@@ -439,6 +429,7 @@ export default function DespatchPlanPage() {
     try {
       await api.post("/despatch-plan/save", { plan_date: planDate, vehicles });
       toast.success("Plan saved");
+      setIsEditing(false);
       loadPlan(planDate);
     } catch (e: any) { toast.error(e.response?.data?.message || "Save failed"); }
     finally { setSaving(false); }
@@ -484,7 +475,7 @@ export default function DespatchPlanPage() {
         
         // Initialize 6 vehicles from Row 1 & 2
         for (let vi = 0; vi < 6; vi++) {
-          const colIdx = 3 + vi * 2;
+          const colIdx = 2 + vi * 2;
           const vLabel = String(raw[0][colIdx] || "").replace("V", "").trim() ? String(raw[0][colIdx]) : `V${vi + 1}`;
           const customer = String(raw[1][colIdx] || "").trim();
           
@@ -502,7 +493,7 @@ export default function DespatchPlanPage() {
           if (!partNumber) continue;
 
           for (let vi = 0; vi < 6; vi++) {
-            const colIdx = 3 + vi * 2;
+            const colIdx = 2 + vi * 2;
             const targetQty = parseInt(String(row[colIdx])) || 0;
             const palletLabel = String(row[colIdx + 1] || "P1").trim();
             const vLabel = String(raw[0][colIdx] || `V${vi + 1}`).trim();
@@ -541,6 +532,7 @@ export default function DespatchPlanPage() {
         }))).then(() => {
           setVehicles(withTubes);
           setPlanExists(false);
+          setIsEditing(true);
           toast.success(`Imported ${withTubes.length} vehicles with progress tracking enabled`);
         });
       } catch (e) { 
@@ -577,7 +569,7 @@ export default function DespatchPlanPage() {
             />
 
             {/* Import */}
-            {canEdit && !planExists && (
+            {canEdit && (!planExists || isEditing) && (
               <>
                 <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5"
                   onClick={() => fileInputRef.current?.click()}>
@@ -598,8 +590,14 @@ export default function DespatchPlanPage() {
               Export Excel
             </Button>
 
+            {canEdit && planExists && !isEditing && (
+              <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5 text-blue-600 hover:text-blue-700 border-blue-300"
+                onClick={() => setIsEditing(true)}>
+                Edit Plan
+              </Button>
+            )}
 
-            {canEdit && !planExists && (
+            {canEdit && (!planExists || isEditing) && (
               <Button size="sm" className="h-9 text-xs gap-1.5"
                 onClick={handleSave} disabled={saving}>
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
@@ -628,7 +626,7 @@ export default function DespatchPlanPage() {
           <div className="flex items-center justify-center py-24 gap-2 text-muted-foreground">
             <Loader2 className="w-5 h-5 animate-spin" /> Loading despatch plan...
           </div>
-        ) : planExists ? (
+        ) : planExists && !isEditing ? (
           /* Read-only table view */
           <div className="space-y-4">
             <PlanTable vehicles={displayedVehicles} />

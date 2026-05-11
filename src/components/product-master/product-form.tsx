@@ -252,7 +252,19 @@ export function ProductForm({ isEdit = false, productId, initialData, isPopup = 
         }, [dynamicData]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+        const { name, value } = e.target;
+        setFormData(prev => {
+            const updated = { ...prev, [name]: value };
+            if (name === "unbalanceInGram") {
+                const val = parseFloat(value);
+                if (!isNaN(val)) {
+                    updated.unbalanceInGram75Percent = (val * 0.75).toFixed(2);
+                } else {
+                    updated.unbalanceInGram75Percent = "";
+                }
+            }
+            return updated;
+        });
     };
 
     const handleSelectChange = (key: string, value: string) => {
