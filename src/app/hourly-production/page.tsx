@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
-import { Loader2, Calendar as CalendarIcon, Save, Plus, Download } from "lucide-react";
+import { Loader2, Calendar as CalendarIcon, Save, Plus, Minus, Download } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -61,6 +61,7 @@ export default function HourlyProductionPage() {
   const [saving, setSaving] = useState(false);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [deletedIds, setDeletedIds] = useState<number[]>([]);
+  const isViewer = user?.role === "viewer";
 
   // ── cumulative state ─────────────────────────────────────────────────────────
   const [summaryMonth, setSummaryMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -133,6 +134,26 @@ export default function HourlyProductionPage() {
     setRecords((prev) => [...prev, { production_date: date, hour_slot, part_type, tube_length: "", quantity: 0, remarks: "", isNew: true }]);
   };
 
+  const handleRemoveRow = (hour_slot: number, part_type: "front" | "rear" | "ia", index: number) => {
+    if (!canEdit) return;
+    setRecords((prev) => {
+      const filtered = prev.filter((r) => r.hour_slot === hour_slot && r.part_type === part_type);
+      if (index < filtered.length) {
+        const target = filtered[index];
+        if (target.id) {
+          setDeletedIds((d) => [...d, target.id!]);
+        }
+        const mainIdx = prev.indexOf(target);
+        if (mainIdx >= 0) {
+          const copy = [...prev];
+          copy.splice(mainIdx, 1);
+          return copy;
+        }
+      }
+      return prev;
+    });
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -170,6 +191,17 @@ export default function HourlyProductionPage() {
     })),
     [summaryData]
   );
+
+  const filteredHours = useMemo(() => {
+    if (!isViewer) return HOURS;
+    const now = new Date();
+    let h = now.getHours();
+    if (h < 6) h += 24; // map 0-5 AM to 24-29
+    
+    // User requested slots FROM 2 slots before.
+    // Example: if current time is 11:50 (h=11), show 9, 10, and 11 slots.
+    return HOURS.filter(slot => slot >= h - 2 && slot <= h);
+  }, [isViewer]);
 
   // ── tab styles ────────────────────────────────────────────────────────────────
   const tabCls = (t: "daily" | "cumulative") =>
@@ -245,7 +277,7 @@ export default function HourlyProductionPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {HOURS.map((hour, rowIdx) => {
+                    {filteredHours.map((hour, rowIdx) => {
                       const rowBg = rowIdx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
                       return (
                         <tr key={hour} className={`${rowBg} hover:bg-slate-100/70 transition-colors`}>
@@ -271,10 +303,17 @@ export default function HourlyProductionPage() {
                                   {recs.map((rec, idx) => (
                                     <div key={idx} className="flex gap-1 items-center mb-1 last:mb-0">
                                       <Input value={rec.remarks} onChange={(e) => handleUpdate(hour, pt.key, idx, "remarks", e.target.value)} disabled={!canEdit} className="h-8 text-xs w-full" placeholder="—" />
-                                      {idx === recs.length - 1 && canEdit && (
-                                        <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleAddRow(hour, pt.key)}>
-                                          <Plus className="w-4 h-4" />
-                                        </Button>
+                                      {canEdit && (
+                                        <div className="flex items-center">
+                                          <Button size="icon" variant="ghost" className="h-6 w-6 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => handleRemoveRow(hour, pt.key, idx)}>
+                                            <Minus className="w-4 h-4" />
+                                          </Button>
+                                          {idx === recs.length - 1 && (
+                                            <Button size="icon" variant="ghost" className="h-6 w-6 text-blue-500 hover:text-blue-700 hover:bg-blue-50" onClick={() => handleAddRow(hour, pt.key)}>
+                                              <Plus className="w-4 h-4" />
+                                            </Button>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
                                   ))}

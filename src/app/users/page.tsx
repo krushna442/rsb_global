@@ -115,6 +115,7 @@ export default function UsersPage() {
     const allMenus = ["Engineering", "BOM Dashboard", "Quality", "Production"];
     const allDocs = data?.documents.map((doc) => doc.name) || [];
 const [mailTypesArray, setMailTypesArray] = useState<MailType[]>([]);
+const [despatchMail, setDespatchMail] = useState<boolean>(false);
 
 const MAIL_TYPE_LABELS: Record<MailType, string> = {
   shift_scan_report:      "Shift Scan Report",
@@ -161,6 +162,7 @@ const handleCheckboxToggle = <T extends string>(
         setDocumentArray([]);
         setNavArray(allNavs);
         setMailTypesArray([]);  
+        setDespatchMail(false);
 
         setOpen(true);
     };
@@ -186,6 +188,7 @@ const handleCheckboxToggle = <T extends string>(
         MAIL_TYPES.includes(type as MailType)
          )
         );
+        setDespatchMail(!!(user as any).despatch_mail);
 
         
         if (mode === "view") {
@@ -208,7 +211,8 @@ const handleCheckboxToggle = <T extends string>(
                 menu_array: menuArray,
                 document_name_array: documentArray,
                 nav_array: navArray,
-                mail_types: mailTypesArray,   // 👈 add this
+                mail_types: mailTypesArray,
+                despatch_mail: despatchMail ? 1 : 0,
 
                 is_active: 1
             };
@@ -398,17 +402,30 @@ const handleCheckboxToggle = <T extends string>(
 
 
     </div>
-      {/* Show Product Image toggle */}
-      <div className="space-y-1.5 ml-6 flex items-center gap-2">
-        <Checkbox
-          checked={formData.show_image === "true"}
-          onCheckedChange={handleCheckboxChange}
-          disabled={modalMode === "view"}
-          className="h-4 w-4 disabled:opacity-50"
-        />
-        <Label className="text-xs font-semibold text-muted-foreground">
-          Show Product Image
-        </Label>
+      {/* Show Product Image + Despatch Mail toggles */}
+      <div className="space-y-1.5 ml-6 flex items-center gap-6">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            checked={formData.show_image === "true"}
+            onCheckedChange={handleCheckboxChange}
+            disabled={modalMode === "view"}
+            className="h-4 w-4 disabled:opacity-50"
+          />
+          <Label className="text-xs font-semibold text-muted-foreground">
+            Show Product Image
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            checked={despatchMail}
+            onCheckedChange={(v) => setDespatchMail(v === true)}
+            disabled={modalMode === "view"}
+            className="h-4 w-4 disabled:opacity-50"
+          />
+          <Label className="text-xs font-semibold text-muted-foreground">
+            Receive Despatch Mail
+          </Label>
+        </div>
       </div>
 
     {/* Footer */}

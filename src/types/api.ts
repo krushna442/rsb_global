@@ -120,6 +120,7 @@ export interface User {
   document_name_array: string[];
   mail_types: string[];   // or MailType[] if you import it here
   nav_array: string[];
+  despatch_mail: number | boolean;
 
   profile_image: string | null;
   is_active: number | boolean;

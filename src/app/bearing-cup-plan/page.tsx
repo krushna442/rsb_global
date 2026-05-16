@@ -13,10 +13,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
-const JOINT_TYPE_OPTIONS = [
-  "135JT", "14K", "17K", "225JT", "325HS", "325M", "403 JP", "403 JT",
-  "490 L", "490I/A", "490M", "590H", "590JT", "590L", "592JT", "620JT", "680JT", "HS 8 HOLE",
-];
+
 
 // Build a dynamic key for shifts beyond the initial 3
 const shiftKey = (i: number) => `shift${i + 1}_qty` as keyof PlanRow;
@@ -31,18 +28,20 @@ interface PlanRow {
   [extra: string]: any; // shift4_qty, shift5_qty ...
   target: number;
   total_qty: number;
+  previous_diff?: number;
+  is_synthetic?: boolean;
 }
 
 // ── Difference badge ──────────────────────────────────────────────────────────
-function DiffBadge({ target, total }: { target: number; total: number }) {
-  const diff = target - total; // Actual - Total Target
-  if (target === 0 && total === 0)
+function DiffBadge({ target, total, prefix = "" }: { target: number; total: number; prefix?: string }) {
+  const diff = target - total; // diff = Actual - Total Target
+  if (target === 0 && total === 0 && diff === 0)
     return <span className="text-xs text-muted-foreground">—</span>;
   if (diff === 0)
-    return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">= 0</span>;
+    return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">{prefix}= 0</span>;
   if (diff > 0)
-    return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">+{diff}</span>;
-  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">{diff}</span>;
+    return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">{prefix}+{diff}</span>;
+  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">{prefix}{diff}</span>;
 }
 
 // ── 6 AM boundary helper ─────────────────────────────────────────────────────
@@ -70,6 +69,10 @@ export default function BearingCupPlanPage() {
 
   // Rows shown in the table (user-selected JT types)
   const [rows, setRows] = useState<PlanRow[]>([]);
+  const [jtOptions, setJtOptions] = useState<string[]>([]);
+
+  // Editable toggle
+  const [isEditing, setIsEditing] = useState(false);
 
   // Import dialog
   const [importOpen, setImportOpen] = useState(false);
@@ -77,7 +80,7 @@ export default function BearingCupPlanPage() {
 
   // ── helpers ─────────────────────────────────────────────────────────────────
   const makeEmptyRow = (jt: string, type: "G" | "NG"): PlanRow => {
-    const r: PlanRow = { jt_type: jt, type, shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0 };
+    const r: PlanRow = { jt_type: jt, type, shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0 };
     for (let i = 3; i < numShifts; i++) r[`shift${i + 1}_qty`] = 0;
     return r;
   };
@@ -109,7 +112,11 @@ export default function BearingCupPlanPage() {
 
       setNumShifts(inferredShifts);
       setRows(loaded);
-      setPlanExists(hasData);
+      
+      // If it only has synthetic rows (carry overs), we shouldn't lock it as an existing plan
+      const hasRealData = loaded.some(r => !r.is_synthetic);
+      setPlanExists(hasRealData);
+      setIsEditing(false);
     } catch {
       toast.error("Failed to load plan for this date");
     } finally {
@@ -117,13 +124,30 @@ export default function BearingCupPlanPage() {
     }
   }, []);
 
+  useEffect(() => {
+    // Fetch dynamic fields for jt types
+    api.get("/dynamic-fields").then(res => {
+      if (res.data?.data?.bearing_JT_types?.length > 0) {
+        setJtOptions(res.data.data.bearing_JT_types);
+      }
+    }).catch(console.error);
+  }, []);
+
   useEffect(() => { loadPlan(date); }, [date, loadPlan]);
+
+  const isFormEditable = canEdit && (!planExists || isEditing);
 
   // ── row mutation ─────────────────────────────────────────────────────────────
   const updateRow = (idx: number, field: string, valStr: string) => {
-    if (!canEdit) return;
-    // When plan is loaded from DB (planExists), only the Actual (target) column is editable
-    if (planExists && field !== "target") return;
+    const isActualField = field === "target";
+    const allowedForEveryone = planExists && isActualField;
+
+    // If not allowed for everyone, must have canEdit permission
+    if (!allowedForEveryone && !canEdit) return;
+
+    // If plan exists and we are NOT in explicit editing mode, only the 'Actual' field is changeable
+    if (planExists && !isEditing && !isActualField) return;
+    
     const val = parseInt(valStr, 10) || 0;
     setRows((prev) => {
       const copy = [...prev];
@@ -137,8 +161,8 @@ export default function BearingCupPlanPage() {
   const addJtRow = () => {
     setRows((prev) => [
       ...prev,
-      makeEmptyRow(JOINT_TYPE_OPTIONS[0], "G"),
-      makeEmptyRow(JOINT_TYPE_OPTIONS[0], "NG"),
+      makeEmptyRow(jtOptions[0] || "NEW", "G"),
+      makeEmptyRow(jtOptions[0] || "NEW", "NG"),
     ]);
   };
 
@@ -183,6 +207,7 @@ export default function BearingCupPlanPage() {
     try {
       await api.put("/bearing-cup-plans", { date, rows });
       toast.success("Plan saved successfully");
+      setIsEditing(false);
       loadPlan(date);
     } catch {
       toast.error("Failed to save plan");
@@ -219,7 +244,7 @@ export default function BearingCupPlanPage() {
     const sheetData: any[][] = [header];
 
     // For each JT option, add two rows (G and NG) with empty shift cells and Actual
-    JOINT_TYPE_OPTIONS.forEach((jt) => {
+    jtOptions.forEach((jt) => {
       sheetData.push([jt, "G", "", "", "", ""]);  // G row
       sheetData.push([jt, "NG", "", "", "", ""]);  // NG row (same JT)
     });
@@ -232,7 +257,7 @@ export default function BearingCupPlanPage() {
     (ws as any)["!dataValidations"].push({
       sqref: XLSX.utils.encode_range(dvRange),
       type: "list",
-      formula1: `"${JOINT_TYPE_OPTIONS.join(",")}"`,
+      formula1: `"${jtOptions.join(",")}"`,
       showDropDown: false,
     });
 
@@ -251,7 +276,7 @@ export default function BearingCupPlanPage() {
 
     // Header
     const shiftHeaders = Array.from({ length: numShifts }, (_, i) => `Shift ${i + 1}`);
-    const header = ["JT Type", "Type", ...shiftHeaders, "Actual", "Total Target", "Diff"];
+    const header = ["JT Type", "Type", "Prev Diff", ...shiftHeaders, "Actual", "Total Target", "Diff"];
     const sheetData: any[][] = [header];
 
     jtTypes.forEach((jt) => {
@@ -260,17 +285,17 @@ export default function BearingCupPlanPage() {
       [gRow, ngRow].forEach((r) => {
         if (!r) return;
         const shiftVals = Array.from({ length: numShifts }, (_, i) => Number(r[shiftKey(i)]) || 0);
-        const diff = r.target - r.total_qty;
-        sheetData.push([r.jt_type, r.type, ...shiftVals, r.target, r.total_qty, diff]);
+        const diff = r.target - r.total_qty; // Actual - Total Target
+        sheetData.push([r.jt_type, r.type, r.previous_diff || 0, ...shiftVals, r.target, r.total_qty, diff]);
       });
     });
 
     // Totals row
     const shiftTotals = Array.from({ length: numShifts }, (_, i) => totals[`s${i + 1}`]);
-    sheetData.push(["TOTAL", "", ...shiftTotals, totals.target, totals.total, totals.target - totals.total]);
+    sheetData.push(["TOTAL", "", "", ...shiftTotals, totals.target, totals.total, totals.target - totals.total]);
 
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
-    ws["!cols"] = [{ wch: 14 }, { wch: 6 }, ...shiftHeaders.map(() => ({ wch: 10 })), { wch: 10 }, { wch: 13 }, { wch: 8 }];
+    ws["!cols"] = [{ wch: 14 }, { wch: 6 }, { wch: 10 }, ...shiftHeaders.map(() => ({ wch: 10 })), { wch: 10 }, { wch: 13 }, { wch: 8 }];
     XLSX.utils.book_append_sheet(wb, ws, date);
     XLSX.writeFile(wb, `bearing_cup_plan_${date}.xlsx`);
     toast.success("Exported successfully");
@@ -290,10 +315,10 @@ export default function BearingCupPlanPage() {
 
         const importedMap: Record<string, { G: PlanRow; NG: PlanRow }> = {};
         // Initialize with empty rows
-        JOINT_TYPE_OPTIONS.forEach(jt => {
+        jtOptions.forEach(jt => {
           importedMap[jt] = {
-            G: { jt_type: jt, type: "G", shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0 },
-            NG: { jt_type: jt, type: "NG", shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0 }
+            G: { jt_type: jt, type: "G", shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0 },
+            NG: { jt_type: jt, type: "NG", shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0 }
           };
         });
 
@@ -313,8 +338,8 @@ export default function BearingCupPlanPage() {
 
           if (!importedMap[jt]) {
             importedMap[jt] = {
-              G: { jt_type: jt, type: "G", shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0 },
-              NG: { jt_type: jt, type: "NG", shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0 }
+              G: { jt_type: jt, type: "G", shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0 },
+              NG: { jt_type: jt, type: "NG", shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0 }
             };
           }
 
@@ -326,6 +351,7 @@ export default function BearingCupPlanPage() {
             shift3_qty: s3,
             target: actual,
             total_qty: s1 + s2 + s3,
+            previous_diff: 0,
           };
         }
 
@@ -382,8 +408,8 @@ export default function BearingCupPlanPage() {
               />
             </div>
 
-            {/* Shift controls — hidden when plan exists */}
-            {canEdit && !planExists && (
+            {/* Shift controls — hidden when plan exists unless editing */}
+            {canEdit && isFormEditable && (
               <div className="flex items-center gap-1 border rounded-md overflow-hidden h-9">
                 <button
                   className="px-2 h-full text-xs text-muted-foreground hover:bg-muted/60 transition-colors border-r"
@@ -428,13 +454,25 @@ export default function BearingCupPlanPage() {
             )}
 
             {canEdit && planExists && (
-              <Button size="sm" className="h-9 gap-1.5" onClick={handleSave} disabled={loading || saving}>
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Update Actual
-              </Button>
+              <div className="flex items-center gap-2">
+                {!isEditing && (
+                  <Button size="sm" variant="secondary" className="h-9 gap-1.5" onClick={() => setIsEditing(true)}>
+                    Edit Plan
+                  </Button>
+                )}
+                {isEditing && (
+                  <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => { setIsEditing(false); loadPlan(date); }} disabled={loading || saving}>
+                    Cancel
+                  </Button>
+                )}
+                <Button size="sm" className="h-9 gap-1.5" onClick={handleSave} disabled={loading || saving}>
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {isEditing ? "Save Plan" : "Update Actual"}
+                </Button>
+              </div>
             )}
 
-            {canEdit && !planExists && (
+            {canEdit && isFormEditable && (
               <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={addJtRow}>
                 <Plus className="w-3.5 h-3.5" /> Add JT Row
               </Button>
@@ -443,10 +481,10 @@ export default function BearingCupPlanPage() {
         </div>
 
         {/* Locked plan banner */}
-        {planExists && date === todayPlanDate && (
+        {planExists && !isEditing && date === todayPlanDate && (
           <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-medium">
             <span className="text-base">🔒</span>
-            Today&apos;s plan is loaded. Shift quantities and JT types are locked — only the <strong className="mx-1">Actual</strong> column can be updated.
+            Today&apos;s plan is loaded. Shift quantities and JT types are locked — only the actuals can be updated. Click "Edit Plan" to modify.
           </div>
         )}
 
@@ -471,12 +509,13 @@ export default function BearingCupPlanPage() {
                   <tr className="bg-slate-100/80 border-b">
                     <th className="px-4 py-3 font-semibold text-slate-700 text-left w-48">JT Type</th>
                     <th className="px-4 py-3 font-semibold text-slate-700 w-16 border-x">Type</th>
+                    <th className="px-3 py-3 font-semibold text-slate-700 min-w-[70px]">Prev Diff</th>
                     {Array.from({ length: numShifts }).map((_, i) => (
-                      <th key={i} className="px-4 py-3 font-semibold text-slate-700 min-w-[100px]">
+                      <th key={i} className="px-4 py-3 font-semibold text-slate-700 min-w-[130px]">
                         Shift {i + 1}
                       </th>
                     ))}
-                    <th className="px-4 py-3 font-semibold text-slate-700 bg-blue-50/50 min-w-[90px]">Actual</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700 bg-blue-50/50 min-w-[75px]">Actual</th>
                     <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50 border-l min-w-[80px]">Total Target</th>
                     <th className="px-4 py-3 font-semibold text-slate-700 min-w-[80px]">Diff</th>
                     {canEdit && <th className="px-3 py-3 w-8"></th>}
@@ -494,48 +533,55 @@ export default function BearingCupPlanPage() {
                         {/* Row G */}
                         {gRow && (
                           <tr key={`${jt}-G`} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="px-3 py-2 text-left border-r border-b-0" rowSpan={ngRow ? 2 : 1}>
-                              {canEdit && !planExists ? (
+                            <td className="px-3 py-2 text-left border-r border-b">
+                              {canEdit && isFormEditable ? (
                                 <select
                                   value={gRow.jt_type}
                                   onChange={(e) => changeJtType(jt, e.target.value)}
                                   className="w-full text-xs border rounded px-2 py-1 bg-background font-medium text-slate-800"
                                 >
-                                  {JOINT_TYPE_OPTIONS.map((opt) => (
+                                  {jtOptions.map((opt) => (
                                     <option key={opt}>{opt}</option>
                                   ))}
                                 </select>
                               ) : (
-                                <span className="font-medium text-slate-800">{jt}</span>
+                                <span className="font-medium text-slate-800">{jt} {gRow.is_synthetic && <span className="text-[10px] text-muted-foreground ml-1">(Carry)</span>}</span>
                               )}
                             </td>
                             <td className="px-4 py-2 border-r font-medium text-emerald-600 bg-emerald-50/30">G</td>
+                            <td className="px-3 py-1.5">
+                              {gRow.previous_diff !== 0 && (
+                                <span className={`text-xs font-bold ${gRow.previous_diff! > 0 ? "text-blue-600" : "text-red-600"}`}>
+                                  {gRow.previous_diff! > 0 ? `+${gRow.previous_diff}` : gRow.previous_diff}
+                                </span>
+                              )}
+                            </td>
                             {Array.from({ length: numShifts }).map((_, i) => (
                               <td key={i} className="px-3 py-1.5">
-                                {planExists ? (
-                                  <span className="block h-8 flex items-center justify-center text-xs font-semibold text-slate-700">{gRow[shiftKey(i)] || 0}</span>
+                                {!isFormEditable ? (
+                                  <span className="block h-8 flex items-center justify-center text-sm font-bold text-slate-800">{gRow[shiftKey(i)] || 0}</span>
                                 ) : (
                                   <Input
                                     type="number" min="0"
                                     value={gRow[shiftKey(i)] || ""}
                                     onChange={(e) => updateRow(gIdx, shiftKey(i) as string, e.target.value)}
                                     disabled={!canEdit}
-                                    className="h-8 text-center text-xs"
+                                    className="h-8 text-center text-sm font-bold"
                                   />
                                 )}
                               </td>
                             ))}
                             <td className="px-3 py-1.5 bg-blue-50/30">
-                              <Input type="number" min="0" value={gRow.target || ""} onChange={(e) => updateRow(gIdx, "target", e.target.value)} disabled={!canEdit} className="h-8 text-center text-xs border-blue-200 focus-visible:ring-blue-400" />
+                              <Input type="number" min="0" value={gRow.target || ""} onChange={(e) => updateRow(gIdx, "target", e.target.value)} disabled={!canEdit && !planExists} className="h-8 text-center text-xs border-blue-200 focus-visible:ring-blue-400" />
                             </td>
-                            <td className={`px-4 py-2 font-bold bg-slate-50/50 border-l ${gRow.total_qty > gRow.target ? "text-green-600" : gRow.total_qty < gRow.target ? "text-red-500" : "text-slate-700"}`}>
+                            <td className={`px-4 py-2 font-bold bg-slate-50/50 border-l ${gRow.target < gRow.total_qty ? "text-red-600" : gRow.target > gRow.total_qty ? "text-green-500" : "text-slate-700"}`}>
                               {gRow.total_qty}
                             </td>
                             <td className="px-4 py-2">
                               <DiffBadge target={gRow.target} total={gRow.total_qty} />
                             </td>
-                            {canEdit && (
-                              <td className="px-2 py-2" rowSpan={ngRow ? 2 : 1}>
+                            {canEdit && isFormEditable && (
+                              <td className="px-2 py-2 border-b">
                                 <button
                                   onClick={() => removeJtPair(jt)}
                                   className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-100 text-red-400 hover:text-red-600 transition-colors"
@@ -550,29 +596,44 @@ export default function BearingCupPlanPage() {
                         {/* Row NG */}
                         {ngRow && (
                           <tr key={`${jt}-NG`} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-3 py-2 text-left border-r border-b">
+                              <span className="font-medium text-slate-400">{jt}</span>
+                            </td>
                             <td className="px-4 py-2 border-r border-b font-medium text-rose-600 bg-rose-50/30">NG</td>
+                            <td className="px-3 py-1.5 border-b">
+                              {ngRow.previous_diff !== 0 && (
+                                <span className={`text-xs font-bold ${ngRow.previous_diff! > 0 ? "text-blue-600" : "text-red-600"}`}>
+                                  {ngRow.previous_diff! > 0 ? `+${ngRow.previous_diff}` : ngRow.previous_diff}
+                                </span>
+                              )}
+                            </td>
                             {Array.from({ length: numShifts }).map((_, i) => (
                               <td key={i} className="px-3 py-1.5 border-b">
-                                {planExists ? (
-                                  <span className="block h-8 flex items-center justify-center text-xs font-semibold text-slate-700">{ngRow[shiftKey(i)] || 0}</span>
+                                {!isFormEditable ? (
+                                  <span className="block h-8 flex items-center justify-center text-sm font-bold text-slate-800">{ngRow[shiftKey(i)] || 0}</span>
                                 ) : (
                                   <Input
                                     type="number" min="0"
                                     value={ngRow[shiftKey(i)] || ""}
                                     onChange={(e) => updateRow(ngIdx, shiftKey(i) as string, e.target.value)}
                                     disabled={!canEdit}
-                                    className="h-8 text-center text-xs"
+                                    className="h-8 text-center text-sm font-bold"
                                   />
                                 )}
                               </td>
                             ))}
                             <td className="px-3 py-1.5 bg-blue-50/30 border-b">
-                              <Input type="number" min="0" value={ngRow.target || ""} onChange={(e) => updateRow(ngIdx, "target", e.target.value)} disabled={!canEdit} className="h-8 text-center text-xs border-blue-200 focus-visible:ring-blue-400" />
+                              <Input type="number" min="0" value={ngRow.target || ""} onChange={(e) => updateRow(ngIdx, "target", e.target.value)} disabled={!canEdit && !planExists} className="h-8 text-center text-xs border-blue-200 focus-visible:ring-blue-400" />
                             </td>
-                            <td className="px-4 py-2 font-bold text-slate-700 bg-slate-50/50 border-l border-b">{ngRow.total_qty}</td>
+                            <td className={`px-4 py-2 font-bold text-slate-700 bg-slate-50/50 border-l border-b ${ngRow.target < ngRow.total_qty ? "text-red-600" : ngRow.target > ngRow.total_qty ? "text-green-500" : "text-slate-700"}`}>{ngRow.total_qty}</td>
                             <td className="px-4 py-2 border-b">
                               <DiffBadge target={ngRow.target} total={ngRow.total_qty} />
                             </td>
+                            {canEdit && isFormEditable && (
+                              <td className="px-2 py-2 border-b">
+                                {/* Empty cell or another delete button if needed */}
+                              </td>
+                            )}
                           </tr>
                         )}
                       </>
@@ -582,7 +643,7 @@ export default function BearingCupPlanPage() {
                 {/* Grand Total Footer */}
                 <tfoot className="bg-slate-800 text-white font-semibold">
                   <tr>
-                    <td colSpan={2} className="px-4 py-3 text-right uppercase tracking-wider text-xs border-r border-slate-700">Daily Grand Total</td>
+                    <td colSpan={3} className="px-4 py-3 text-right uppercase tracking-wider text-xs border-r border-slate-700">Daily Grand Total</td>
                     {Array.from({ length: numShifts }).map((_, i) => (
                       <td key={i} className="px-4 py-3">{totals[`s${i + 1}`]}</td>
                     ))}
@@ -608,6 +669,7 @@ export default function BearingCupPlanPage() {
             <p className="text-sm text-muted-foreground">
               Use the template (3 shifts). Only rows with at least one non-zero shift value will be imported.
               The first occurrence of each JT type is treated as <strong>G</strong>, the second as <strong>NG</strong>.
+              If you have added new dynamic JT types, you should download the template again.
             </p>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate}>

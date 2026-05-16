@@ -25,12 +25,15 @@ interface Pallet {
   tube_length: string;
   target_qty: number;
   scanned_qty: number;
+  filled_quantity: number;
   is_fulfilled: boolean;
+  invalid?: boolean;
 }
 interface Vehicle {
   id?: number;
   vehicle_label: string;
   customer: string;
+  priority_number: number | null;
   is_completed: boolean;
   pallets: Pallet[];
 }
@@ -58,10 +61,10 @@ function customerColor(c: string) {
 }
 
 function makeEmptyPallet(): Pallet {
-  return { pallet_label: "", part_number: "", tube_length: "", target_qty: 0, scanned_qty: 0, is_fulfilled: false };
+  return { pallet_label: "", part_number: "", tube_length: "", target_qty: 0, scanned_qty: 0, filled_quantity: 0, is_fulfilled: false };
 }
 function makeEmptyVehicle(label: string): Vehicle {
-  return { vehicle_label: label, customer: "", is_completed: false, pallets: [makeEmptyPallet()] };
+  return { vehicle_label: label, customer: "", priority_number: null, is_completed: false, pallets: [makeEmptyPallet()] };
 }
 
 // ── Input View: vehicle card for data entry ────────────────────────────────────
@@ -114,6 +117,18 @@ function VehicleCard({ vehicle, idx, canEdit, customerOptions, onChange, onRemov
         </select>
       </div>
 
+      {/* Priority */}
+      <div className="px-2 py-1.5 border-b border-inherit flex items-center gap-1.5">
+        <span className="text-[10px] text-slate-500 font-semibold whitespace-nowrap">Priority #</span>
+        <input
+          type="number" min="1"
+          value={vehicle.priority_number ?? ""}
+          onChange={e => onChange({ ...vehicle, priority_number: e.target.value ? parseInt(e.target.value) : null })}
+          placeholder="—"
+          className="w-full h-6 text-xs border rounded px-1.5 bg-white"
+        />
+      </div>
+
       {/* Pallets */}
       <div className="flex flex-col gap-2 px-2 py-2 flex-1">
         {vehicle.pallets.map((p, pi) => (
@@ -137,7 +152,7 @@ function VehicleCard({ vehicle, idx, canEdit, customerOptions, onChange, onRemov
                 updatePallet(pi, "part_number", pn);
               }}
               placeholder="Part Number"
-              className="h-6 text-xs"
+              className={`h-6 text-xs ${p.invalid ? "border-red-500 bg-red-50" : ""}`}
             />
             <div className="flex items-center gap-1.5">
               <Input
@@ -167,14 +182,17 @@ function VehicleCard({ vehicle, idx, canEdit, customerOptions, onChange, onRemov
   );
 }
 
-// ── Read-only Table View: when today's record exists ──────────────────────────
-function PlanTable({ vehicles }: { vehicles: Vehicle[] }) {
+// ── Read-only Table View ──────────────────────────────────────────────────────
+function PlanTable({ vehicles, onPriorityChange }: {
+  vehicles: Vehicle[];
+  onPriorityChange?: (vehicleId: number, priority: number | null) => void;
+}) {
   return (
     <div className="overflow-x-auto rounded-xl border shadow-sm">
       <table className="w-full text-sm text-left">
         <thead>
           <tr className="bg-slate-800 text-white">
-            {["Vehicle", "Customer", "Pallet", "Part Number", "Tube Length", "Target Qty", "Scanned Qty", "Fulfilled", "Status"].map(h => (
+            {["Vehicle", "Customer", "Priority", "Pallet", "Part Number", "Tube Length", "Target Qty", "Filled Qty", "Fulfilled"].map(h => (
               <th key={h} className="px-4 py-3 font-semibold text-xs uppercase tracking-wider whitespace-nowrap">{h}</th>
             ))}
           </tr>
@@ -184,7 +202,7 @@ function PlanTable({ vehicles }: { vehicles: Vehicle[] }) {
             if (!v.pallets || v.pallets.length === 0) {
               const isComplete = v.is_completed;
               return (
-                <tr key={v.vehicle_label} className={`border-b ${isComplete ? "bg-green-50" : "bg-white"} hover:brightness-95 transition`}>
+                <tr key={v.vehicle_label} className={`border-b ${isComplete ? "bg-green-50" : "bg-white"}`}>
                   <td className={`px-4 py-2 font-bold border-r ${isComplete ? "text-green-700" : "text-yellow-700"}`}>
                     <div className="flex items-center gap-1.5">
                       {isComplete && <CheckCircle2 className="w-4 h-4 text-green-600" />}
@@ -192,24 +210,16 @@ function PlanTable({ vehicles }: { vehicles: Vehicle[] }) {
                     </div>
                   </td>
                   <td className="px-4 py-2 border-r">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${customerColor(v.customer)}`}>
-                      {v.customer || "—"}
-                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${customerColor(v.customer)}`}>{v.customer || "—"}</span>
                   </td>
-                  <td colSpan={7} className="px-4 py-2 text-center text-slate-400 italic">No pallets defined for this vehicle</td>
+                  <td colSpan={7} className="px-4 py-2 text-center text-slate-400 italic">No pallets</td>
                 </tr>
               );
             }
             return v.pallets.map((p, pi) => {
               const isComplete = v.is_completed;
-              const isFulfilled = p.is_fulfilled;
-              const rowBg = isComplete
-                ? "bg-green-50"
-                : isFulfilled
-                ? "bg-green-100"
-                : p.scanned_qty > 0
-                ? "bg-yellow-50"
-                : "bg-white";
+              const isFulfilled = !!p.is_fulfilled;
+              const rowBg = isComplete ? "bg-green-50" : isFulfilled ? "bg-green-100" : p.filled_quantity > 0 ? "bg-yellow-50" : "bg-white";
               return (
                 <tr key={`${v.vehicle_label}-${pi}`} className={`border-b ${rowBg} hover:brightness-95 transition`}>
                   {pi === 0 ? (
@@ -222,27 +232,40 @@ function PlanTable({ vehicles }: { vehicles: Vehicle[] }) {
                   ) : null}
                   {pi === 0 ? (
                     <td className="px-4 py-2 border-r" rowSpan={v.pallets.length}>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${customerColor(v.customer)}`}>
-                        {v.customer || "—"}
-                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${customerColor(v.customer)}`}>{v.customer || "—"}</span>
+                    </td>
+                  ) : null}
+                  {pi === 0 ? (
+                    <td className="px-4 py-2 border-r text-center" rowSpan={v.pallets.length}>
+                      {onPriorityChange && v.id ? (
+                        <input
+                          type="number" min="1"
+                          defaultValue={v.priority_number ?? ""}
+                          placeholder="—"
+                          className="w-14 h-6 text-xs border rounded px-1 text-center"
+                          onBlur={e => {
+                            const val = e.target.value;
+                            onPriorityChange(v.id!, val ? parseInt(val) : null);
+                          }}
+                        />
+                      ) : (
+                        v.priority_number != null
+                          ? <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-100 text-blue-800 border border-blue-300">P{v.priority_number}</span>
+                          : <span className="text-slate-400 text-xs">—</span>
+                      )}
                     </td>
                   ) : null}
                   <td className="px-4 py-2 font-medium border-r">{p.pallet_label || "—"}</td>
                   <td className="px-4 py-2 font-mono text-xs border-r">{p.part_number || "—"}</td>
                   <td className="px-4 py-2 text-xs border-r text-slate-600">{p.tube_length || "—"}</td>
                   <td className="px-4 py-2 text-center font-semibold border-r">{p.target_qty}</td>
-                  <td className={`px-4 py-2 text-center font-semibold border-r ${p.scanned_qty >= p.target_qty && p.target_qty > 0 ? "text-green-700" : p.scanned_qty > 0 ? "text-orange-600" : "text-slate-500"}`}>
-                    {p.scanned_qty}
+                  <td className={`px-4 py-2 text-center font-semibold border-r ${p.filled_quantity >= p.target_qty && p.target_qty > 0 ? "text-green-700" : p.filled_quantity > 0 ? "text-orange-600" : "text-slate-500"}`}>
+                    {p.filled_quantity}
                   </td>
                   <td className="px-4 py-2 text-center border-r">
                     {isFulfilled
                       ? <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-green-500 text-white">✓ Yes</span>
                       : <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-yellow-200 text-yellow-800">Pending</span>}
-                  </td>
-                  <td className="px-4 py-2 text-center">
-                    {isComplete
-                      ? <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-green-600 text-white">Complete</span>
-                      : <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-yellow-400 text-gray-900">In Progress</span>}
                   </td>
                 </tr>
               );
@@ -271,9 +294,8 @@ export default function DespatchPlanPage() {
   const { user } = useUser();
   const canEdit = ["admin", "super admin", "production"].includes(user?.role || "");
 
-  const { todayScannedProducts, fetchTodayScannedProducts } = useScannedProducts();
-  const { dropdownOptions } = useProducts();
-  const customerList = dropdownOptions?.CUSTOMER_OPTIONS   || [];
+  const { dropdownOptions, products } = useProducts();
+  const customerList = dropdownOptions?.CUSTOMER_OPTIONS || [];
 
   const [planDate, setPlanDate] = useState(getPlanDate());
   const [vehicles, setVehicles] = useState<Vehicle[]>([makeEmptyVehicle("V1")]);
@@ -351,8 +373,8 @@ export default function DespatchPlanPage() {
           ...v,
           pallets: (v.pallets || []).map(p => ({
             ...p,
-            part_number: (p as any).part_number || "",
-            tube_length: (p as any).tube_length || "",
+            part_number: p.part_number || "",
+            tube_length: p.tube_length || "",
           })),
         })));
       } else {
@@ -364,57 +386,24 @@ export default function DespatchPlanPage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { 
+  useEffect(() => {
     loadPlan(planDate);
-    fetchTodayScannedProducts();
-  }, [planDate, loadPlan, fetchTodayScannedProducts]);
+  }, [planDate, loadPlan]);
 
-  const aggregatedScans = useMemo(() => {
-    const aggMap: Record<string, number> = {};
-    todayScannedProducts.forEach((s: any) => {
-      const cust = (s.customer_name || s.customer || "").trim();
-      const pn = (s.part_no || s.part_number || "").trim();
-      const key = `${cust}||${pn}`;
-      aggMap[key] = (aggMap[key] || 0) + 1;
-    });
-    return aggMap;
-  }, [todayScannedProducts]);
-
+  // displayedVehicles: in read-only mode, use backend data directly (backend manages filled_quantity & is_fulfilled)
   const displayedVehicles = useMemo(() => {
     if (!planExists || isEditing) return vehicles;
+    return vehicles; // backend already has correct filled_quantity & is_fulfilled
+  }, [vehicles, planExists, isEditing]);
 
-    // Build a map of remaining scan quantities
-    const remainingScans = { ...aggregatedScans };
-
-    // Pass 1: Distribute up to target_qty for each pallet
-    const matched = vehicles.map(v => {
-      const pallets = v.pallets.map(p => {
-        const key = `${(v.customer || "").trim()}||${(p.part_number || "").trim()}`;
-        let scanned = 0;
-        if (remainingScans[key] > 0 && p.target_qty > 0) {
-          scanned = Math.min(remainingScans[key], p.target_qty);
-          remainingScans[key] -= scanned;
-        }
-        return { ...p, scanned_qty: scanned, is_fulfilled: p.target_qty > 0 && scanned >= p.target_qty };
-      });
-      return { ...v, pallets };
-    });
-
-    // Pass 2: Dump any over-production into the first matching pallet found
-    matched.forEach(v => {
-      v.pallets.forEach(p => {
-        const key = `${(v.customer || "").trim()}||${(p.part_number || "").trim()}`;
-        if (remainingScans[key] > 0) {
-          p.scanned_qty += remainingScans[key];
-          remainingScans[key] = 0;
-          p.is_fulfilled = p.target_qty > 0 && p.scanned_qty >= p.target_qty;
-        }
-      });
-      v.is_completed = v.pallets.length > 0 && v.pallets.every(p => p.is_fulfilled);
-    });
-
-    return matched;
-  }, [vehicles, aggregatedScans, planExists]);
+  // handlePriorityChange: inline priority update from table
+  const handlePriorityChange = useCallback(async (vehicleId: number, priority: number | null) => {
+    try {
+      await api.patch(`/despatch-plan/vehicles/${vehicleId}/priority`, { priority_number: priority });
+      toast.success("Priority updated");
+      loadPlan(planDate); // reload so backend re-orders by priority
+    } catch { toast.error("Failed to update priority"); }
+  }, [planDate, loadPlan]);
 
   const addVehicle = () => {
     const nextLabel = `V${vehicles.length + 1}`;
@@ -425,6 +414,27 @@ export default function DespatchPlanPage() {
     setVehicles(prev => { const next = [...prev]; next[idx] = v; return next; });
 
   const handleSave = async () => {
+    const invalidPallets: string[] = [];
+    const validPartNumbers = new Set(
+      (products || []).map((p: any) => (p.part_number || p.partNumber || "").trim().toUpperCase())
+    );
+
+    const checkedVehicles = vehicles.map(v => ({
+      ...v,
+      pallets: v.pallets.map(p => {
+        const pn = (p.part_number || "").trim();
+        const isInvalid = !!(pn && !validPartNumbers.has(pn.toUpperCase()));
+        if (isInvalid) invalidPallets.push(`${v.vehicle_label}/${p.pallet_label || pn}`);
+        return { ...p, invalid: isInvalid };
+      }),
+    }));
+    setVehicles(checkedVehicles);
+
+    if (invalidPallets.length > 0) {
+      toast.error(`Invalid part numbers found: ${invalidPallets.join(", ")}. Please correct before saving.`);
+      return;
+    }
+
     setSaving(true);
     try {
       await api.post("/despatch-plan/save", { plan_date: planDate, vehicles });
@@ -434,6 +444,7 @@ export default function DespatchPlanPage() {
     } catch (e: any) { toast.error(e.response?.data?.message || "Save failed"); }
     finally { setSaving(false); }
   };
+
 
 
   const handleExport = async () => {
@@ -459,85 +470,67 @@ export default function DespatchPlanPage() {
         const data = new Uint8Array(ev.target!.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
+        // raw[0] = Row1: Part Number | Tube Length | V1 | (blank) | V2 | (blank) ...
+        // raw[1] = Row2: (blank) | (blank) | Customer | Pallet | Customer | Pallet ...
+        // raw[2+] = data: part_number | tube_length | target_qty | pallet_label | ...
         const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        if (raw.length < 3) return toast.error("File is empty or invalid structure");
 
-        if (raw.length < 2) return toast.error("File is empty or invalid structure");
-
-        // Row 1 (raw[0]) is headers like ['Part number', 'TUBE LENGTH', 'SUPPLY', 'V1', '', 'V2'...]
-        // Row 2 (raw[1]) is sub-headers like ['', '', '', 'TML', 'PALLET', 'TML', 'PALLET'...]
-        const customersRow = raw[0]; // Wait, in sheet_to_json with header:1, raw[0] is the first row.
-        // So:
-        // raw[0] -> Row 1 (V1, V2...)
-        // raw[1] -> Row 2 (Customer, PALLET...)
-        // raw[2+] -> Data rows
-        
         const vehicleMap: Record<string, Vehicle> = {};
-        
-        // Initialize 6 vehicles from Row 1 & 2
-        for (let vi = 0; vi < 6; vi++) {
-          const colIdx = 2 + vi * 2;
-          const vLabel = String(raw[0][colIdx] || "").replace("V", "").trim() ? String(raw[0][colIdx]) : `V${vi + 1}`;
-          const customer = String(raw[1][colIdx] || "").trim();
-          
-          // Only create vehicle if customer is provided and is not the placeholder text
+        const vehicleOrder: string[] = [];
+
+        // Detect how many vehicle pairs exist in row 1 (starting from col index 2, step 2)
+        let col = 2;
+        while (col < (raw[0]?.length || 0)) {
+          const vLabel = String(raw[0][col] || "").trim();
+          const customer = String(raw[1]?.[col] || "").trim();
+          if (!vLabel) { col += 2; continue; }
+          // Skip placeholder headers
           if (customer && customer.toUpperCase() !== "CUSTOMER") {
-            vehicleMap[vLabel] = { vehicle_label: vLabel, customer, is_completed: false, pallets: [] };
+            vehicleMap[vLabel] = { vehicle_label: vLabel, customer, priority_number: null, is_completed: false, pallets: [] };
+            vehicleOrder.push(vLabel);
           }
+          col += 2;
         }
 
-        // Parse Data Rows
+        // Parse data rows
         for (let ri = 2; ri < raw.length; ri++) {
           const row = raw[ri];
           const partNumber = String(row[0] || "").trim();
           const tubeLength = String(row[1] || "").trim();
           if (!partNumber) continue;
 
-          for (let vi = 0; vi < 6; vi++) {
-            const colIdx = 2 + vi * 2;
-            const targetQty = parseInt(String(row[colIdx])) || 0;
-            const palletLabel = String(row[colIdx + 1] || "P1").trim();
-            const vLabel = String(raw[0][colIdx] || `V${vi + 1}`).trim();
-
+          let col = 2;
+          let vi = 0;
+          while (col < row.length && vi < vehicleOrder.length) {
+            const vLabel = vehicleOrder[vi];
+            const targetQty = parseInt(String(row[col])) || 0;
+            const palletLabel = String(row[col + 1] || `P${vi + 1}`).trim();
             if (targetQty > 0 && vehicleMap[vLabel]) {
               vehicleMap[vLabel].pallets.push({
-                pallet_label: palletLabel, 
-                part_number: partNumber, 
+                pallet_label: palletLabel,
+                part_number: partNumber,
                 tube_length: tubeLength,
-                target_qty: targetQty, 
-                scanned_qty: 0, 
+                target_qty: targetQty,
+                scanned_qty: 0,
+                filled_quantity: 0,
                 is_fulfilled: false,
               });
             }
+            col += 2; vi++;
           }
         }
 
-        const imported = Object.values(vehicleMap);
+        const imported = vehicleOrder.map(l => vehicleMap[l]).filter(Boolean);
         if (!imported.length) return toast.error("No valid vehicle/pallet data found");
 
-        // Auto-fetch tube lengths if missing
-        const withTubes = [...imported];
-        toast.info("Verifying specifications...");
-        
-        Promise.all(withTubes.flatMap(v => v.pallets.map(async p => {
-          if (!p.tube_length && p.part_number.length >= 4) {
-            try {
-              const res = await api.get(`/products?part_number=${p.part_number}`);
-              const prod = res.data.data?.[0];
-              if (prod?.specification) {
-                const spec = typeof prod.specification === 'string' ? JSON.parse(prod.specification) : prod.specification;
-                if (spec.tubeLength) p.tube_length = spec.tubeLength;
-              }
-            } catch(e) {}
-          }
-        }))).then(() => {
-          setVehicles(withTubes);
-          setPlanExists(false);
-          setIsEditing(true);
-          toast.success(`Imported ${withTubes.length} vehicles with progress tracking enabled`);
-        });
-      } catch (e) { 
+        setVehicles(imported);
+        setPlanExists(false);
+        setIsEditing(true);
+        toast.success(`Imported ${imported.length} vehicles`);
+      } catch (e) {
         console.error(e);
-        toast.error("Failed to parse Matrix Excel file"); 
+        toast.error("Failed to parse Excel file");
       }
     };
     reader.readAsArrayBuffer(file);
@@ -629,7 +622,7 @@ export default function DespatchPlanPage() {
         ) : planExists && !isEditing ? (
           /* Read-only table view */
           <div className="space-y-4">
-            <PlanTable vehicles={displayedVehicles} />
+            <PlanTable vehicles={displayedVehicles} onPriorityChange={canEdit ? handlePriorityChange : undefined} />
             {/* Summary */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {displayedVehicles.map(v => {

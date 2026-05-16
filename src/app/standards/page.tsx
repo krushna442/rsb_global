@@ -9,11 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
-import { Plus, Pencil, Trash2, Upload, History, Search, Loader2, Download, File } from "lucide-react";
+import { Plus, Pencil, Trash2, Upload, History, Search, Loader2, Download, File as FileIcon } from "lucide-react";
 
 interface Standard {
   id: number; standard_no: string; description: string | null;
-  rev_number: string | null; rev_date: string | null; comment: string | null;
+  rev_number: string | null; rev_date: string | null; comment: string | null; remarks: string | null;
   file_path: string | null; category: string;
   version: number; is_latest: number; created_by: string; created_at: string;
 }
@@ -35,7 +35,7 @@ function FileLink({ path }: { path: string | null }) {
   return (
     <a href={getFileUrl(path)} target="_blank" rel="noreferrer"
       className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium transition-colors">
-      <File className="w-3.5 h-3.5" />View
+      <FileIcon className="w-3.5 h-3.5" />View
     </a>
   );
 }
@@ -44,17 +44,18 @@ function FileLink({ path }: { path: string | null }) {
 function StandardModal({ open, onClose, editStandard, onSaved, categories }: {
   open: boolean; onClose: () => void; editStandard: Standard | null; onSaved: () => void; categories: string[];
 }) {
-  const [form, setForm] = useState({ standard_no: "", description: "", rev_number: "", rev_date: "", comment: "", category: "" });
+  const [form, setForm] = useState({ standard_no: "", description: "", rev_number: "", rev_date: "", comment: "", category: "", remarks: "" });
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState(0);
   const isEdit = !!editStandard;
 
   useEffect(() => {
     const defaultCat = categories[0] || "MANUAL";
     if (editStandard) {
-      setForm({ standard_no: editStandard.standard_no, description: editStandard.description || "", rev_number: editStandard.rev_number || "", rev_date: editStandard.rev_date || "", comment: editStandard.comment || "", category: editStandard.category });
+      setForm({ standard_no: editStandard.standard_no, description: editStandard.description || "", rev_number: editStandard.rev_number || "", rev_date: editStandard.rev_date || "", comment: editStandard.comment || "", category: editStandard.category, remarks: editStandard.remarks || "" });
     } else {
-      setForm({ standard_no: "", description: "", rev_number: "", rev_date: "", comment: "", category: defaultCat });
+      setForm({ standard_no: "", description: "", rev_number: "", rev_date: "", comment: "", category: defaultCat, remarks: "" });
     }
     setFile(null);
   }, [editStandard, open, categories]);
@@ -62,18 +63,48 @@ function StandardModal({ open, onClose, editStandard, onSaved, categories }: {
   const handleSave = async () => {
     if (!form.standard_no.trim()) return toast.error("Standard No is required");
     setSaving(true);
+    setProgress(0);
     try {
+      let finalFilePath = null;
+      if (file) {
+        const chunkSize = 5 * 1024 * 1024;
+        const totalChunks = Math.ceil(file.size / chunkSize);
+        const uploadId = Date.now().toString() + Math.random().toString(36).substring(2);
+
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * chunkSize;
+          const end = Math.min(start + chunkSize, file.size);
+          const chunkFile = new File([file.slice(start, end)], file.name, { type: file.type });
+          const fd = new FormData();
+          fd.append("uploadId", uploadId);
+          fd.append("chunkIndex", i.toString());
+          fd.append("totalChunks", totalChunks.toString());
+          fd.append("fileName", file.name);
+          fd.append("chunk", chunkFile);
+
+          const res = await api.post(
+            `/standards/upload-chunk?uploadId=${uploadId}&chunkIndex=${i}`,
+            fd,
+            { headers: { "Content-Type": undefined } }
+          );
+          if (res.data.file_path) finalFilePath = res.data.file_path;
+          setProgress(Math.round(((i + 1) / totalChunks) * 100));
+        }
+      }
+
+      const payload = { ...form, file_path_from_chunks: finalFilePath };
       if (isEdit) {
-        await api.put(`/standards/${editStandard!.id}`, form);
+        await api.put(`/standards/${editStandard!.id}`, payload);
       } else {
         const fd = new FormData();
         Object.entries(form).forEach(([k, v]) => fd.append(k, v));
-        if (file) fd.append("file", file);
-        await api.post("/standards", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        if (finalFilePath) fd.append("file_path_from_chunks", finalFilePath);
+        else if (file) fd.append("file", file);
+        await api.post("/standards", fd, { headers: { "Content-Type": undefined } });
       }
       toast.success(isEdit ? "Updated" : "Standard added"); onSaved(); onClose();
     } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); }
-    finally { setSaving(false); }
+    finally { setSaving(false); setProgress(0); }
   };
 
   return (
@@ -107,16 +138,21 @@ function StandardModal({ open, onClose, editStandard, onSaved, categories }: {
             <label className="text-xs font-semibold text-muted-foreground">Comment</label>
             <Input value={form.comment} onChange={e => setForm(f => ({ ...f, comment: e.target.value }))} className="mt-1" />
           </div>
+          <div className="col-span-2">
+            <label className="text-xs font-semibold text-muted-foreground">Remarks</label>
+            <Input value={form.remarks} onChange={e => setForm(f => ({ ...f, remarks: e.target.value }))} className="mt-1" />
+          </div>
           {!isEdit && (
             <div className="col-span-2">
               <label className="text-xs font-semibold text-muted-foreground">File (optional)</label>
               <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" />
+              {saving && progress > 0 && <div className="h-1 bg-muted mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} /></div>}
             </div>
           )}
         </div>
         <div className="flex justify-end gap-2 pt-3">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}{isEdit ? "Save" : "Add"}</Button>
+          <Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}{saving && progress > 0 ? `${progress}%` : (isEdit ? "Save" : "Add")}</Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -125,12 +161,53 @@ function StandardModal({ open, onClose, editStandard, onSaved, categories }: {
 
 function NewVersionModal({ standard, onClose, onSaved }: { standard: Standard | null; onClose: () => void; onSaved: () => void; }) {
   const [revNo, setRevNo] = useState(""); const [revDate, setRevDate] = useState(new Date().toISOString().slice(0, 10));
-  const [comment, setComment] = useState(""); const [file, setFile] = useState<File | null>(null); const [saving, setSaving] = useState(false);
-  useEffect(() => { if (standard) { setRevNo(standard.rev_number || ""); setComment(standard.comment || ""); } setFile(null); }, [standard]);
+  const [comment, setComment] = useState(""); const [remarks, setRemarks] = useState(""); const [file, setFile] = useState<File | null>(null); const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState(0);
+  useEffect(() => { if (standard) { setRevNo(standard.rev_number || ""); setComment(standard.comment || ""); setRemarks(""); } setFile(null); }, [standard]);
   const handleSave = async () => {
     if (!file) return toast.error("Please select a file");
     setSaving(true);
-    try { const fd = new FormData(); fd.append("rev_number", revNo); fd.append("rev_date", revDate); fd.append("comment", comment); fd.append("file", file); await api.post(`/standards/${standard!.id}/new-version`, fd, { headers: { "Content-Type": "multipart/form-data" } }); toast.success("New version uploaded"); onSaved(); onClose(); } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); } finally { setSaving(false); }
+    setProgress(0);
+    try {
+      let finalFilePath = null;
+      if (file) {
+        const chunkSize = 5 * 1024 * 1024;
+        const totalChunks = Math.ceil(file.size / chunkSize);
+        const uploadId = Date.now().toString() + Math.random().toString(36).substring(2);
+
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * chunkSize;
+          const end = Math.min(start + chunkSize, file.size);
+          const chunkFile = new File([file.slice(start, end)], file.name, { type: file.type });
+          const fd = new FormData();
+          fd.append("uploadId", uploadId);
+          fd.append("chunkIndex", i.toString());
+          fd.append("totalChunks", totalChunks.toString());
+          fd.append("fileName", file.name);
+          fd.append("chunk", chunkFile);
+
+          const res = await api.post(
+            `/standards/upload-chunk?uploadId=${uploadId}&chunkIndex=${i}`,
+            fd,
+            { headers: { "Content-Type": undefined } }
+          );
+          if (res.data.file_path) finalFilePath = res.data.file_path;
+          setProgress(Math.round(((i + 1) / totalChunks) * 100));
+        }
+      }
+
+      const fd = new FormData();
+      fd.append("rev_number", revNo);
+      fd.append("rev_date", revDate);
+      fd.append("comment", comment);
+      fd.append("remarks", remarks);
+      if (finalFilePath) fd.append("file_path_from_chunks", finalFilePath);
+      else fd.append("file", file);
+
+      await api.post(`/standards/${standard!.id}/new-version`, fd, { headers: { "Content-Type": undefined } });
+      toast.success("New version uploaded"); onSaved(); onClose();
+    } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); }
+    finally { setSaving(false); setProgress(0); }
   };
   return (
     <Dialog open={!!standard} onOpenChange={o => !o && onClose()}>
@@ -142,8 +219,9 @@ function NewVersionModal({ standard, onClose, onSaved }: { standard: Standard | 
             <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><Input type="date" value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
           </div>
           <div><label className="text-xs font-semibold text-muted-foreground">Comment</label><Input value={comment} onChange={e => setComment(e.target.value)} className="mt-1" /></div>
-          <div><label className="text-xs font-semibold text-muted-foreground">File *</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>
-          <div className="flex justify-end gap-2 pt-1"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}Upload</Button></div>
+          <div><label className="text-xs font-semibold text-muted-foreground">Remarks</label><Input value={remarks} onChange={e => setRemarks(e.target.value)} className="mt-1" /></div>
+          <div><label className="text-xs font-semibold text-muted-foreground">File *</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" />{saving && progress > 0 && <div className="h-1 bg-muted mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} /></div>}</div>
+          <div className="flex justify-end gap-2 pt-1"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}{saving && progress > 0 ? `${progress}%` : "Upload"}</Button></div>
         </div>
       </DialogContent>
     </Dialog>
@@ -176,8 +254,8 @@ function VersionsModal({ standardId, onClose }: { standardId: number | null; onC
 }
 
 function exportCSV(data: Standard[], category: string) {
-  const headers = ["SR No.", "Standard No.", "Description", "Category", "Rev Number", "Rev Date", "Comment", "Document", "Version"];
-  const rows = data.map((s, i) => [i + 1, s.standard_no, s.description || "", s.category, s.rev_number || "", fmtDate(s.rev_date), s.comment || "", s.file_path ? getFileUrl(s.file_path) : "", s.version]);
+  const headers = ["SR No.", "Standard No.", "Description", "Category", "Rev Number", "Rev Date", "Comment", "Remarks", "Document", "Version"];
+  const rows = data.map((s, i) => [i + 1, s.standard_no, s.description || "", s.category, s.rev_number || "", fmtDate(s.rev_date), s.comment || "", s.remarks || "", s.file_path ? getFileUrl(s.file_path) : "", s.version]);
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob); const a = document.createElement("a");
@@ -190,7 +268,7 @@ export default function StandardsPage() {
   const [standards, setStandards] = useState<Standard[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("ALL");
+  const [activeTab, setActiveTab] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [editStandard, setEditStandard] = useState<Standard | null>(null);
@@ -237,7 +315,7 @@ export default function StandardsPage() {
     const q = search.toLowerCase().trim();
     return standards.filter(s => {
       const matchSearch = !q || (s.standard_no || "").toLowerCase().includes(q) || (s.description || "").toLowerCase().includes(q);
-      const matchTab = activeTab === "ALL" || s.category === activeTab;
+      const matchTab = !activeTab || s.category === activeTab;
       return matchSearch && matchTab;
     });
   }, [standards, search, activeTab]);
@@ -247,8 +325,14 @@ export default function StandardsPage() {
     const ordered = categories.length > 0
       ? [...categories.filter(n => fromData.includes(n)), ...fromData.filter(n => !categories.includes(n))]
       : fromData;
-    return ["ALL", ...ordered];
+    return ordered;
   }, [standards, categories]);
+
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.includes(activeTab)) {
+      setActiveTab(tabs[0]);
+    }
+  }, [tabs, activeTab]);
 
   const tabCount = useMemo(() => {
     const map: Record<string, number> = { ALL: standards.length };
@@ -310,6 +394,7 @@ export default function StandardsPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Rev No.</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Rev Date</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Comment</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Remarks</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Document</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Ver.</th>
                     {isAdmin && <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Actions</th>}
@@ -327,6 +412,7 @@ export default function StandardsPage() {
                       <td className="px-4 py-3 text-xs font-semibold">{s.rev_number || "—"}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{fmtDate(s.rev_date)}</td>
                       <td className="px-4 py-3 text-xs max-w-[160px] truncate text-muted-foreground">{s.comment || "—"}</td>
+                      <td className="px-4 py-3 text-xs max-w-[160px] truncate text-muted-foreground">{s.remarks || "—"}</td>
                       <td className="px-4 py-3"><FileLink path={s.file_path} /></td>
                       <td className="px-4 py-3"><Badge variant="outline" className="text-[10px]">v{s.version}</Badge></td>
                       {isAdmin && (

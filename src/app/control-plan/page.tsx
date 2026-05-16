@@ -162,7 +162,7 @@ interface ControlPlan {
   id: number; name: string; line: string; rev_no: string | null;
   rev_date: string | null; file_path: string | null; is_active: number;
   language: string; version: number; parent_id: number | null;
-  is_latest: number; created_by: string; created_at: string;
+  is_latest: number; sequence_number: number; created_by: string; created_at: string;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_URL || "";
@@ -218,14 +218,15 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines }: {
   open: boolean; onClose: () => void; editPlan: ControlPlan | null; onSaved: () => void; lines: string[];
 }) {
   const [name, setName] = useState(""); const [line, setLine] = useState(lines[0] || "");
+  const [sequenceNo, setSequenceNo] = useState<number | "">("");
   const [revNo, setRevNo] = useState(""); const [revDate, setRevDate] = useState("");
   const [language, setLanguage] = useState("English"); const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const isEdit = !!editPlan;
 
   useEffect(() => {
-    if (editPlan) { setName(editPlan.name); setLine(editPlan.line); setRevNo(editPlan.rev_no || ""); setRevDate(editPlan.rev_date || ""); setLanguage(editPlan.language); }
-    else { setName(""); setLine(lines[0] || ""); setRevNo(""); setRevDate(""); setLanguage("English"); }
+    if (editPlan) { setName(editPlan.name); setLine(editPlan.line); setSequenceNo(editPlan.sequence_number || 0); setRevNo(editPlan.rev_no || ""); setRevDate(editPlan.rev_date || ""); setLanguage(editPlan.language); }
+    else { setName(""); setLine(lines[0] || ""); setSequenceNo(""); setRevNo(""); setRevDate(""); setLanguage("English"); }
     setFile(null);
   }, [editPlan, open, lines]);
 
@@ -234,11 +235,12 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines }: {
     setSaving(true);
     try {
       if (isEdit) {
-        await api.put(`/control-plans/${editPlan!.id}`, { name, line, rev_no: revNo, rev_date: revDate, language });
+        await api.put(`/control-plans/${editPlan!.id}`, { name, line, rev_no: revNo, rev_date: revDate, language, sequence_number: Number(sequenceNo) || 0 });
       } else {
         const fd = new FormData();
         fd.append("name", name.trim()); fd.append("line", line); fd.append("rev_no", revNo);
         fd.append("rev_date", revDate); fd.append("language", language);
+        fd.append("sequence_number", (Number(sequenceNo) || 0).toString());
         if (file) fd.append("file", file);
         await api.post("/control-plans", fd, { headers: { "Content-Type": "multipart/form-data" } });
       }
@@ -258,6 +260,7 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines }: {
               {lines.map(l => <option key={l}>{l}</option>)}
             </select>
           </div>
+          <div><label className="text-xs font-semibold text-muted-foreground">Sequence Number</label><Input type="number" value={sequenceNo} onChange={e => setSequenceNo(e.target.value === "" ? "" : Number(e.target.value))} className="mt-1" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-semibold text-muted-foreground">Rev No</label><Input value={revNo} onChange={e => setRevNo(e.target.value)} className="mt-1" /></div>
             <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><Input type="date" value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
@@ -345,7 +348,7 @@ export default function ControlPlanPage() {
   const [plans, setPlans] = useState<ControlPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("ALL");
+  const [activeTab, setActiveTab] = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const [langFilter, setLangFilter] = useState<LangFilter>("ALL");
   const [lines, setLines] = useState<string[]>([]);
@@ -402,7 +405,7 @@ export default function ControlPlanPage() {
       if (!showInactive && !p.is_active) return false;
       if (langFilter !== "ALL" && p.language !== langFilter) return false;
       const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.rev_no || "").toLowerCase().includes(q);
-      const matchTab = activeTab === "ALL" || p.line === activeTab;
+      const matchTab = !activeTab || p.line === activeTab;
       return matchSearch && matchTab;
     });
   }, [plans, search, activeTab, showInactive, langFilter]);
@@ -412,8 +415,14 @@ export default function ControlPlanPage() {
     const ordered = lines.length > 0
       ? [...lines.filter(n => fromData.includes(n)), ...fromData.filter(n => !lines.includes(n))]
       : fromData;
-    return ["ALL", ...ordered, SOP_VIDEO_TAB];
+    return [...ordered, SOP_VIDEO_TAB];
   }, [plans, lines]);
+
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.includes(activeTab)) {
+      setActiveTab(tabs[0]);
+    }
+  }, [tabs, activeTab]);
 
   const tabCount = useMemo(() => {
     const visible = (p: ControlPlan) =>
@@ -488,7 +497,7 @@ export default function ControlPlanPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-muted/60 border-b">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground w-10">SR</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground w-10">Seq</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Plan Name</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Line</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Rev No.</th>
@@ -503,7 +512,7 @@ export default function ControlPlanPage() {
                 <tbody>
                   {filtered.map((p, i) => (
                     <tr key={p.id} className={`border-b transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/20"} hover:bg-green-50/40 ${!p.is_active ? "opacity-60" : ""}`}>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{i + 1}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{p.sequence_number}</td>
                       <td className="px-4 py-3 text-xs font-semibold">{p.name}</td>
                       <td className="px-4 py-3 text-xs">
                         <span className="bg-green-50 text-green-700 border border-green-100 rounded px-2 py-0.5 font-medium text-[11px]">{p.line}</span>

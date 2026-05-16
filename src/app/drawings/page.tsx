@@ -11,14 +11,14 @@ import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
 import {
   Plus, Eye, Pencil, Trash2, Upload, History, Search,
-  Loader2, X, Download, FileText, File
+  Loader2, X, Download, FileText, File as FileIcon
 } from "lucide-react";
 
 interface Drawing {
-  id: number; drawing_number: string; shaft: string | null; joint: string | null;
+  id: number; drawing_number: string; serial_number: string | null; shaft: string | null; joint: string | null;
   part_number: string | null; customer: string | null; modification_number: string | null;
   modification_date: string | null; bom: string | null; file_path: string | null;
-  version: number; is_latest: number; created_by: string; created_at: string;
+  version: number; is_latest: number; remarks: string | null; created_by: string; created_at: string;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_URL || "";
@@ -53,7 +53,7 @@ function FileLink({ path, label }: { path: string | null; label: string }) {
   return (
     <a href={getFileUrl(path)} target="_blank" rel="noreferrer"
       className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 transition-colors text-xs font-medium">
-      <File className="w-3.5 h-3.5" />
+      <FileIcon className="w-3.5 h-3.5" />
       {label}
     </a>
   );
@@ -63,21 +63,23 @@ function FileLink({ path, label }: { path: string | null; label: string }) {
 function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames }: {
   open: boolean; onClose: () => void; editDrawing: Drawing | null; onSaved: () => void; customerNames: string[];
 }) {
-  const [form, setForm] = useState({ drawing_number: "", shaft: "", joint: "", customer: "", modification_number: "" });
+  const [form, setForm] = useState({ drawing_number: "", shaft: "", joint: "", customer: "", modification_number: "", remarks: "" });
   const [partNumbers, setPartNumbers] = useState<string[]>([""]);
   const [file, setFile] = useState<File | null>(null);
   const [bomFile, setBomFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState(0);
   const isEdit = !!editDrawing;
+  const isRSB = form.customer?.toUpperCase() === "RSB";
 
   useEffect(() => {
     if (editDrawing) {
-      setForm({ drawing_number: editDrawing.drawing_number, shaft: editDrawing.shaft || "", joint: editDrawing.joint || "", customer: editDrawing.customer || "", modification_number: editDrawing.modification_number || "" });
+      setForm({ drawing_number: editDrawing.drawing_number, shaft: editDrawing.shaft || "", joint: editDrawing.joint || "", customer: editDrawing.customer || "", modification_number: editDrawing.modification_number || "", remarks: editDrawing.remarks || "" });
       // Split existing comma-separated part numbers into individual fields
       const parts = editDrawing.part_number ? editDrawing.part_number.split(",").map(p => p.trim()) : [""];
       setPartNumbers(parts.length > 0 ? parts : [""]);
     } else {
-      setForm({ drawing_number: "", shaft: "", joint: "", customer: customerNames[0] || "", modification_number: "" });
+      setForm({ drawing_number: "", shaft: "", joint: "", customer: customerNames[0] || "", modification_number: "", remarks: "" });
       setPartNumbers([""]);
     }
     setFile(null); setBomFile(null);
@@ -99,14 +101,54 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames }: {
   const handleSave = async () => {
     if (!form.drawing_number.trim()) return toast.error("Drawing number is required");
     setSaving(true);
+    setProgress(0);
+
     try {
+      let finalFilePath = null;
+      let finalBomPath = null;
+
+      // Chunked Upload for main Drawing file
+      if (file) {
+        const chunkSize = 5 * 1024 * 1024; // 5MB
+        const totalChunks = Math.ceil(file.size / chunkSize);
+        const uploadId = Date.now().toString() + Math.random().toString(36).substring(2);
+
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * chunkSize;
+          const end = Math.min(start + chunkSize, file.size);
+          // Wrap Blob slice as a proper File so multer sees it as a file field
+          const chunkFile = new File([file.slice(start, end)], file.name, { type: file.type });
+          const fd = new FormData();
+          fd.append("uploadId", uploadId);
+          fd.append("chunkIndex", i.toString());
+          fd.append("totalChunks", totalChunks.toString());
+          fd.append("fileName", file.name);
+          fd.append("chunk", chunkFile);
+
+          const res = await api.post(
+            `/drawings/upload-chunk?uploadId=${uploadId}&chunkIndex=${i}`,
+            fd,
+            { headers: { "Content-Type": undefined } }  // let axios set multipart boundary
+          );
+          if (res.data.file_path) finalFilePath = res.data.file_path;
+          setProgress(Math.round(((i + 1) / totalChunks) * 100));
+        }
+      }
+
+      // Regular upload for BOM (usually small, so keep it simple or implement same if needed)
+      // For now, if it's small, we can send it in the final request.
+      // But let's use the standard way.
+
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => fd.append(k, v));
-      // Join part numbers back to comma-separated string, filtering empty ones
       const partNumberValue = partNumbers.filter(p => p.trim()).join(", ");
       fd.append("part_number", partNumberValue);
-      if (file) fd.append("file", file);
+      
+      if (finalFilePath) fd.append("file_path_from_chunks", finalFilePath);
+      else if (file) fd.append("file", file); // fallback if small
+
       if (bomFile) fd.append("bom_file", bomFile);
+
       if (isEdit) {
         await api.put(`/drawings/${editDrawing!.id}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       } else {
@@ -114,7 +156,7 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames }: {
       }
       toast.success(isEdit ? "Updated" : "Drawing added"); onSaved(); onClose();
     } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); }
-    finally { setSaving(false); }
+    finally { setSaving(false); setProgress(0); }
   };
 
   return (
@@ -143,6 +185,10 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames }: {
           <div>
             <label className="text-xs font-semibold text-muted-foreground">Modification Number</label>
             <Input value={form.modification_number} onChange={e => setForm(f => ({ ...f, modification_number: e.target.value }))} className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground">Remarks</label>
+            <Input value={form.remarks} onChange={e => setForm(f => ({ ...f, remarks: e.target.value }))} className="mt-1" />
           </div>
 
           {/* Part Numbers Section */}
@@ -186,17 +232,20 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames }: {
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-muted-foreground">Drawing File</label>
+            <label className="text-xs font-semibold text-muted-foreground">{isRSB ? "Drawing File" : "Drawing File"}</label>
             <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm w-full" />
+            {saving && progress > 0 && <div className="h-1 bg-muted mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} /></div>}
           </div>
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground">BOM File</label>
-            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setBomFile(e.target.files?.[0] || null)} className="mt-1 block text-sm w-full" />
-          </div>
+          {!isRSB && (
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground">BOM File</label>
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setBomFile(e.target.files?.[0] || null)} className="mt-1 block text-sm w-full" />
+            </div>
+          )}
         </div>
         <div className="flex justify-end gap-2 pt-3">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}{isEdit ? "Save" : "Add"}</Button>
+          <Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}{saving && progress > 0 ? `${progress}%` : (isEdit ? "Save" : "Add")}</Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -206,23 +255,58 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames }: {
 // ── New Version Modal ─────────────────────────────────────────────────────────
 function NewVersionModal({ drawing, onClose, onSaved }: { drawing: Drawing | null; onClose: () => void; onSaved: () => void; }) {
   const [modNo, setModNo] = useState("");
+  const [remarks, setRemarks] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [bomFile, setBomFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const isRSB = drawing?.customer?.toUpperCase() === "RSB";
 
-  useEffect(() => { if (drawing) setModNo(drawing.modification_number || ""); setFile(null); setBomFile(null); }, [drawing]);
+  useEffect(() => { if (drawing) { setModNo(drawing.modification_number || ""); setRemarks(""); } setFile(null); setBomFile(null); }, [drawing]);
 
   const handleSave = async () => {
+    if (!file) return toast.error("Please select a drawing file");
     setSaving(true);
+    setProgress(0);
     try {
+      let finalFilePath = null;
+      if (file) {
+        const chunkSize = 5 * 1024 * 1024;
+        const totalChunks = Math.ceil(file.size / chunkSize);
+        const uploadId = Date.now().toString() + Math.random().toString(36).substring(2);
+
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * chunkSize;
+          const end = Math.min(start + chunkSize, file.size);
+          const chunkFile = new File([file.slice(start, end)], file.name, { type: file.type });
+          const fd = new FormData();
+          fd.append("uploadId", uploadId);
+          fd.append("chunkIndex", i.toString());
+          fd.append("totalChunks", totalChunks.toString());
+          fd.append("fileName", file.name);
+          fd.append("chunk", chunkFile);
+
+          const res = await api.post(
+            `/drawings/upload-chunk?uploadId=${uploadId}&chunkIndex=${i}`,
+            fd,
+            { headers: { "Content-Type": undefined } }
+          );
+          if (res.data.file_path) finalFilePath = res.data.file_path;
+          setProgress(Math.round(((i + 1) / totalChunks) * 100));
+        }
+      }
+
       const fd = new FormData();
       fd.append("modification_number", modNo);
-      if (file) fd.append("file", file);
+      fd.append("remarks", remarks);
+      if (finalFilePath) fd.append("file_path_from_chunks", finalFilePath);
+      else fd.append("file", file);
       if (bomFile) fd.append("bom_file", bomFile);
-      await api.post(`/drawings/${drawing!.id}/new-version`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+
+      await api.post(`/drawings/${drawing!.id}/new-version`, fd, { headers: { "Content-Type": undefined } });
       toast.success("New version uploaded"); onSaved(); onClose();
     } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); }
-    finally { setSaving(false); }
+    finally { setSaving(false); setProgress(0); }
   };
 
   return (
@@ -231,21 +315,21 @@ function NewVersionModal({ drawing, onClose, onSaved }: { drawing: Drawing | nul
         <DialogTitle>Upload New Drawing Version</DialogTitle>
         <p className="text-xs text-muted-foreground mt-1">{drawing?.drawing_number} · Current: v{drawing?.version}</p>
         <div className="space-y-3 mt-3">
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground">Modification Number</label>
-            <Input value={modNo} onChange={e => setModNo(e.target.value)} className="mt-1" />
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-semibold text-muted-foreground">Mod Number</label><Input value={modNo} onChange={e => setModNo(e.target.value)} className="mt-1" /></div>
+            <div><label className="text-xs font-semibold text-muted-foreground">Remarks</label><Input value={remarks} onChange={e => setRemarks(e.target.value)} className="mt-1" /></div>
           </div>
           <div>
-            <label className="text-xs font-semibold text-muted-foreground">New Drawing File</label>
+            <label className="text-xs font-semibold text-muted-foreground">{isRSB ? "Drawing File *" : "Drawing File *"}</label>
             <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" />
+            {saving && progress > 0 && <div className="h-1 bg-muted mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} /></div>}
           </div>
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground">New BOM File</label>
-            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setBomFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" />
-          </div>
+          {!isRSB && (
+            <div><label className="text-xs font-semibold text-muted-foreground">BOM File (optional)</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setBomFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}Upload</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}{saving && progress > 0 ? `${progress}%` : "Upload"}</Button>
           </div>
         </div>
       </DialogContent>
@@ -290,17 +374,20 @@ function VersionsModal({ drawingId, onClose }: { drawingId: number | null; onClo
 }
 
 // ── Export to CSV ─────────────────────────────────────────────────────────────
-function exportCSV(data: (Drawing & { slNo?: string })[], customer: string) {
-  const headers = ["Sl No.", "Drawing Number", "Description", "Joint", "Part Number(s)", "Customer", "Mod Number", "Mod Date"];
+function exportCSV(data: Drawing[], customer: string) {
+  const headers = ["Sl No.", "Drawing Number", "Description", "Joint", "Part Number(s)", "Customer", "Mod Number", "Mod Date", "Remarks", "Drawing", "BOM"];
   const rows = data.map((d, i) => [
-    d.slNo || (i + 1).toString(),
+    d.serial_number || (i + 1).toString(),
     d.drawing_number,
     d.shaft || "",
     d.joint || "",
     d.part_number || "",
     d.customer || "",
     d.modification_number || "",
-    fmtDate(d.modification_date)
+    fmtDate(d.modification_date),
+    d.remarks || "",
+    d.file_path ? "Yes" : "No",
+    d.bom ? "Yes" : "No"
   ]);
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -317,7 +404,7 @@ export default function DrawingsPage() {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<string>("ALL");
+  const [activeTab, setActiveTab] = useState<string>("");
   const [customerNames, setCustomerNames] = useState<string[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [editDrawing, setEditDrawing] = useState<Drawing | null>(null);
@@ -369,7 +456,7 @@ export default function DrawingsPage() {
         (d.shaft || "").toLowerCase().includes(q) ||
         (d.part_number || "").toLowerCase().includes(q) ||
         (d.modification_number || "").toLowerCase().includes(q);
-      const matchTab = activeTab === "ALL" || (d.customer || "Unknown") === activeTab;
+      const matchTab = !activeTab || (d.customer || "Unknown") === activeTab;
       return matchSearch && matchTab;
     });
   }, [drawings, search, activeTab]);
@@ -393,8 +480,14 @@ export default function DrawingsPage() {
     const ordered = customerNames.length > 0
       ? [...customerNames.filter(n => fromData.includes(n)), ...fromData.filter(n => !customerNames.includes(n))]
       : fromData;
-    return ["ALL", ...ordered];
+    return ordered;
   }, [drawings, customerNames]);
+
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.includes(activeTab)) {
+      setActiveTab(tabs[0]);
+    }
+  }, [tabs, activeTab]);
 
   const tabCount = useMemo(() => {
     const map: Record<string, number> = { ALL: drawings.length };
@@ -416,7 +509,7 @@ export default function DrawingsPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input placeholder="Search part no. or description..." className="pl-9 h-9 w-64 text-sm" value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5" onClick={() => exportCSV(filteredWithSlNo, activeTab)}>
+            <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5" onClick={() => exportCSV(filtered, activeTab)}>
               <Download className="w-3.5 h-3.5" />Export CSV
             </Button>
             {isAdmin && <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5" onClick={() => setIsAddCustomerOpen(true)}><Plus className="w-3.5 h-3.5" />Add Customer</Button>}
@@ -460,7 +553,8 @@ export default function DrawingsPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Customer</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Mod No.</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Mod Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Document</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Remarks</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">{activeTab?.toUpperCase() === "RSB" ? "Drawing" : "Document"}</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">BOM</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Ver.</th>
                     {isAdmin && <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Actions</th>}
@@ -469,7 +563,7 @@ export default function DrawingsPage() {
                 <tbody>
                   {filteredWithSlNo.map((d, i) => (
                     <tr key={d.id} className={`border-b transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/20"} hover:bg-blue-50/40`}>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{d.slNo || (i + 1)}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{d.serial_number || (i + 1)}</td>
                       <td className="px-4 py-3 font-mono text-xs font-semibold">{d.drawing_number}</td>
                       <td className="px-4 py-3 text-xs max-w-[140px] truncate">{d.shaft || "—"}</td>
                       <td className="px-4 py-3 text-xs">{d.joint || "—"}</td>
@@ -487,7 +581,8 @@ export default function DrawingsPage() {
                       </td>
                       <td className="px-4 py-3 text-xs font-semibold">{d.modification_number || "—"}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{fmtDate(d.modification_date)}</td>
-                      <td className="px-4 py-3"><FileLink path={d.file_path} label="View" /></td>
+                      <td className="px-4 py-3 text-xs max-w-[150px] truncate text-muted-foreground">{d.remarks || "—"}</td>
+                      <td className="px-4 py-3"><FileLink path={d.file_path} label={d.customer?.toUpperCase() === "RSB" ? "Drawing" : "View"} /></td>
                       <td className="px-4 py-3"><FileLink path={d.bom} label="BOM" /></td>
                       <td className="px-4 py-3"><Badge variant="outline" className="text-[10px]">v{d.version}</Badge></td>
                       {isAdmin && (
