@@ -28,6 +28,7 @@ import {
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useScannedProducts } from "@/contexts/ScannedProductsContext";
 import { useUser } from "@/contexts/UserContext";
+import { getISTDate } from "@/lib/utils";
 import {
     PieChart,
     Pie,
@@ -78,13 +79,13 @@ const getExcelDateLabel = (dateFilter: string, fromDate: string, toDate: string)
         const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
         return `${d} ${months[Number(m) - 1]} ${y}`;
     };
-    const today = new Date();
-    const todayStr = fmt(today.toISOString().split("T")[0]);
+    const todayStr = fmt(getISTDate());
 
     if (dateFilter === "today") return `${todayStr} to ${todayStr}`;
     if (dateFilter === "this_month" || dateFilter === "default") {
-        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-        return `${fmt(firstDay.toISOString().split("T")[0])} to ${todayStr}`;
+        const now = new Date();
+        const firstDayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        return `${fmt(firstDayStr)} to ${todayStr}`;
     }
     if (dateFilter === "custom") {
         return `${fromDate ? fmt(fromDate) : "Start"} to ${toDate ? fmt(toDate) : "End"}`;

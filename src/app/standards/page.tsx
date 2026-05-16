@@ -313,10 +313,17 @@ export default function StandardsPage() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return standards.filter(s => {
+    const result = standards.filter(s => {
       const matchSearch = !q || (s.standard_no || "").toLowerCase().includes(q) || (s.description || "").toLowerCase().includes(q);
       const matchTab = !activeTab || s.category === activeTab;
       return matchSearch && matchTab;
+    });
+
+    // Natural sort by standard_no
+    return result.sort((a, b) => {
+      const snA = a.standard_no || "";
+      const snB = b.standard_no || "";
+      return snA.localeCompare(snB, undefined, { numeric: true, sensitivity: 'base' });
     });
   }, [standards, search, activeTab]);
 

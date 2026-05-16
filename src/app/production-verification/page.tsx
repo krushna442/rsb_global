@@ -15,6 +15,7 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { parseScanText } from "./parseScanText.js";
+import { getISTDate, getWorkingDate } from "@/lib/utils";
 
 const CUSTOMER_OPTIONS          = ["ALL ALW", "ALL PNR", "ALL HUSUR", "TML", "VECV", "SWITCH MOBILITY", "IPLT"];
 const PRODUCT_TYPE_OPTIONS      = ["COMPONENT", "DUMB", "FRONT", "I/A", "INTEGRATED", "MIDDLE", "NA", "REAR"];
@@ -34,10 +35,10 @@ const scannedInputRef = useRef<HTMLInputElement>(null);
 
     // ── Fetch ALL records once on mount (no pagination params) ───────────────
     useEffect(() => {
-const today = new Date().toISOString().split("T")[0];
-fetchDailySummary(today);    // fetchScannedProducts is stable (useCallback), runs only on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+        const today = getISTDate();
+        fetchDailySummary(today);
+    }, [fetchDailySummary]);
+
 
     // ── Client-side pagination & Search ──────────────────────────────────────────
     const [currentPage, setCurrentPage] = useState(1);
@@ -227,7 +228,7 @@ const focusScanInput = useCallback(() => {
 
         const result = await recordScan({
             part_no:        partNo,
-            dispatch_date:  new Date().toISOString().split("T")[0],
+            dispatch_date:  getWorkingDate(),
             shift:          currentShift,
             customer_name:  formCustomer || "Unknown",
             product_type:   formProductType || "Unknown",

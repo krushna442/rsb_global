@@ -193,7 +193,7 @@ function PlanTable({ vehicles, onPriorityChange }: {
         <thead>
           <tr className="bg-slate-800 text-white">
             {["Vehicle", "Customer", "Priority", "Pallet", "Part Number", "Tube Length", "Target Qty", "Filled Qty", "Fulfilled"].map(h => (
-              <th key={h} className="px-4 py-3 font-semibold text-xs uppercase tracking-wider whitespace-nowrap">{h}</th>
+              <th key={h} className="px-4 py-4 font-bold text-sm uppercase tracking-wider whitespace-nowrap">{h}</th>
             ))}
           </tr>
         </thead>
@@ -203,16 +203,16 @@ function PlanTable({ vehicles, onPriorityChange }: {
               const isComplete = v.is_completed;
               return (
                 <tr key={v.vehicle_label} className={`border-b ${isComplete ? "bg-green-50" : "bg-white"}`}>
-                  <td className={`px-4 py-2 font-bold border-r ${isComplete ? "text-green-700" : "text-yellow-700"}`}>
+                  <td className={`px-4 py-3 font-extrabold text-base border-r ${isComplete ? "text-green-700" : "text-yellow-700"}`}>
                     <div className="flex items-center gap-1.5">
-                      {isComplete && <CheckCircle2 className="w-4 h-4 text-green-600" />}
+                      {isComplete && <CheckCircle2 className="w-5 h-5 text-green-600" />}
                       {v.vehicle_label}
                     </div>
                   </td>
-                  <td className="px-4 py-2 border-r">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${customerColor(v.customer)}`}>{v.customer || "—"}</span>
+                  <td className="px-4 py-3 border-r">
+                    <span className={`px-3 py-1 rounded-full text-sm font-bold border ${customerColor(v.customer)}`}>{v.customer || "—"}</span>
                   </td>
-                  <td colSpan={7} className="px-4 py-2 text-center text-slate-400 italic">No pallets</td>
+                  <td colSpan={7} className="px-4 py-3 text-center text-slate-400 italic font-bold">No pallets</td>
                 </tr>
               );
             }
@@ -223,26 +223,26 @@ function PlanTable({ vehicles, onPriorityChange }: {
               return (
                 <tr key={`${v.vehicle_label}-${pi}`} className={`border-b ${rowBg} hover:brightness-95 transition`}>
                   {pi === 0 ? (
-                    <td className={`px-4 py-2 font-bold border-r ${isComplete ? "text-green-700" : "text-yellow-700"}`} rowSpan={v.pallets.length}>
+                    <td className={`px-4 py-3 font-extrabold text-lg border-r ${isComplete ? "text-green-700" : "text-yellow-700"}`} rowSpan={v.pallets.length}>
                       <div className="flex items-center gap-1.5">
-                        {isComplete && <CheckCircle2 className="w-4 h-4 text-green-600" />}
+                        {isComplete && <CheckCircle2 className="w-5 h-5 text-green-600" />}
                         {v.vehicle_label}
                       </div>
                     </td>
                   ) : null}
                   {pi === 0 ? (
-                    <td className="px-4 py-2 border-r" rowSpan={v.pallets.length}>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${customerColor(v.customer)}`}>{v.customer || "—"}</span>
+                    <td className="px-4 py-3 border-r" rowSpan={v.pallets.length}>
+                      <span className={`px-3 py-1 rounded-full text-sm font-bold border ${customerColor(v.customer)}`}>{v.customer || "—"}</span>
                     </td>
                   ) : null}
                   {pi === 0 ? (
-                    <td className="px-4 py-2 border-r text-center" rowSpan={v.pallets.length}>
+                    <td className="px-4 py-3 border-r text-center" rowSpan={v.pallets.length}>
                       {onPriorityChange && v.id ? (
                         <input
                           type="number" min="1"
                           defaultValue={v.priority_number ?? ""}
                           placeholder="—"
-                          className="w-14 h-6 text-xs border rounded px-1 text-center"
+                          className="w-16 h-8 text-sm font-bold border-2 rounded px-1 text-center"
                           onBlur={e => {
                             const val = e.target.value;
                             onPriorityChange(v.id!, val ? parseInt(val) : null);
@@ -250,22 +250,22 @@ function PlanTable({ vehicles, onPriorityChange }: {
                         />
                       ) : (
                         v.priority_number != null
-                          ? <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-100 text-blue-800 border border-blue-300">P{v.priority_number}</span>
-                          : <span className="text-slate-400 text-xs">—</span>
+                          ? <span className="px-3 py-1 text-xs font-black rounded-full bg-blue-100 text-blue-800 border-2 border-blue-300">P{v.priority_number}</span>
+                          : <span className="text-slate-400 text-sm font-bold">—</span>
                       )}
                     </td>
                   ) : null}
-                  <td className="px-4 py-2 font-medium border-r">{p.pallet_label || "—"}</td>
-                  <td className="px-4 py-2 font-mono text-xs border-r">{p.part_number || "—"}</td>
-                  <td className="px-4 py-2 text-xs border-r text-slate-600">{p.tube_length || "—"}</td>
-                  <td className="px-4 py-2 text-center font-semibold border-r">{p.target_qty}</td>
-                  <td className={`px-4 py-2 text-center font-semibold border-r ${p.filled_quantity >= p.target_qty && p.target_qty > 0 ? "text-green-700" : p.filled_quantity > 0 ? "text-orange-600" : "text-slate-500"}`}>
+                  <td className="px-4 py-3 font-bold text-base border-r">{p.pallet_label || "—"}</td>
+                  <td className="px-4 py-3 font-mono text-base font-bold border-r">{p.part_number || "—"}</td>
+                  <td className="px-4 py-3 text-sm font-bold border-r text-slate-700">{p.tube_length || "—"}</td>
+                  <td className="px-4 py-3 text-center font-black text-lg border-r">{p.target_qty}</td>
+                  <td className={`px-4 py-3 text-center font-black text-lg border-r ${p.filled_quantity >= p.target_qty && p.target_qty > 0 ? "text-green-700" : p.filled_quantity > 0 ? "text-orange-600" : "text-slate-500"}`}>
                     {p.filled_quantity}
                   </td>
-                  <td className="px-4 py-2 text-center border-r">
+                  <td className="px-4 py-3 text-center border-r">
                     {isFulfilled
-                      ? <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-green-500 text-white">✓ Yes</span>
-                      : <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-yellow-200 text-yellow-800">Pending</span>}
+                      ? <span className="px-3 py-1 text-xs font-black rounded-full bg-green-500 text-white shadow-sm">✓ YES</span>
+                      : <span className="px-3 py-1 text-xs font-black rounded-full bg-yellow-400 text-yellow-900 shadow-sm">PENDING</span>}
                   </td>
                 </tr>
               );
@@ -314,38 +314,37 @@ export default function DespatchPlanPage() {
     const worksheet = workbook.addWorksheet('DespatchPlan');
 
     // Headers
-    const row1 = ['Part number', 'TUBE LENGTH'];
-    const row2 = ['', ''];
-    for (let i = 1; i <= 6; i++) {
-      row1.push(`V${i}`, '');
-      row2.push('CUSTOMER', 'PALLET');
+    const header = [];
+    const subHeader = [];
+    for (let i = 1; i <= 8; i++) {
+      header.push('Part number', 'TUBE LENGTH', `V${i}`, '');
+      subHeader.push('', '', 'CUSTOMER', 'PALLET');
     }
-    worksheet.addRow(row1);
-    worksheet.addRow(row2);
+    worksheet.addRow(header);
+    worksheet.addRow(subHeader);
 
     // Styling
     worksheet.getRow(1).font = { bold: true };
     worksheet.getRow(2).font = { bold: true };
-    worksheet.getColumn(1).width = 20;
-    worksheet.getColumn(2).width = 15;
 
-    // Dropdowns for Customers in Row 2
-    for (let i = 0; i < 6; i++) {
-      const colIdx = 3 + (i * 2);
+    // Dropdowns and widths
+    for (let i = 0; i < 8; i++) {
+      const colIdx = 3 + (i * 4);
       const cell = worksheet.getRow(2).getCell(colIdx);
       cell.dataValidation = {
         type: 'list',
         allowBlank: true,
         formulae: [`"${customerList.join(',')}"`],
       };
-      worksheet.getColumn(colIdx).width = 15;
-      worksheet.getColumn(colIdx + 1).width = 12;
+      worksheet.getColumn(colIdx - 2).width = 18; // Part number
+      worksheet.getColumn(colIdx - 1).width = 16; // TUBE LENGTH
+      worksheet.getColumn(colIdx).width = 10;     // Qty (V)
+      worksheet.getColumn(colIdx + 1).width = 12; // PALLET
     }
 
     // Sample Data
     const samples = [
-      ['FC327100', '1329', 10, 'P1'],
-      ['FEA55700', '1100', 5, 'P2'],
+      ['FC327100', '1329', 10, 'p1', 'FEA55700', '1100', 5, 'p1'],
     ];
     samples.forEach(s => worksheet.addRow(s));
 
@@ -389,6 +388,14 @@ export default function DespatchPlanPage() {
   useEffect(() => {
     loadPlan(planDate);
   }, [planDate, loadPlan]);
+
+  // Auto-refresh plan every 30s in read-only mode to pick up filled_quantity updates from scans
+  useEffect(() => {
+    if (!planExists || isEditing) return;
+    const interval = setInterval(() => loadPlan(planDate), 30000);
+    return () => clearInterval(interval);
+  }, [planExists, isEditing, planDate, loadPlan]);
+
 
   // displayedVehicles: in read-only mode, use backend data directly (backend manages filled_quantity & is_fulfilled)
   const displayedVehicles = useMemo(() => {
@@ -479,45 +486,46 @@ export default function DespatchPlanPage() {
         const vehicleMap: Record<string, Vehicle> = {};
         const vehicleOrder: string[] = [];
 
-        // Detect how many vehicle pairs exist in row 1 (starting from col index 2, step 2)
-        let col = 2;
+        // Detect how many vehicle groups (4 cols each) exist
+        let col = 0;
         while (col < (raw[0]?.length || 0)) {
-          const vLabel = String(raw[0][col] || "").trim();
-          const customer = String(raw[1]?.[col] || "").trim();
-          if (!vLabel) { col += 2; continue; }
-          // Skip placeholder headers
-          if (customer && customer.toUpperCase() !== "CUSTOMER") {
+          const vLabel = String(raw[0][col + 2] || "").trim();
+          const customer = String(raw[1]?.[col + 2] || "").trim();
+          
+          if (vLabel.startsWith("V") && customer && customer.toUpperCase() !== "CUSTOMER") {
             vehicleMap[vLabel] = { vehicle_label: vLabel, customer, priority_number: null, is_completed: false, pallets: [] };
             vehicleOrder.push(vLabel);
           }
-          col += 2;
+          col += 4;
         }
 
         // Parse data rows
         for (let ri = 2; ri < raw.length; ri++) {
           const row = raw[ri];
-          const partNumber = String(row[0] || "").trim();
-          const tubeLength = String(row[1] || "").trim();
-          if (!partNumber) continue;
+          if (!row || row.length === 0) continue;
 
-          let col = 2;
-          let vi = 0;
-          while (col < row.length && vi < vehicleOrder.length) {
-            const vLabel = vehicleOrder[vi];
-            const targetQty = parseInt(String(row[col])) || 0;
-            const palletLabel = String(row[col + 1] || `P${vi + 1}`).trim();
-            if (targetQty > 0 && vehicleMap[vLabel]) {
-              vehicleMap[vLabel].pallets.push({
-                pallet_label: palletLabel,
-                part_number: partNumber,
-                tube_length: tubeLength,
-                target_qty: targetQty,
-                scanned_qty: 0,
-                filled_quantity: 0,
-                is_fulfilled: false,
-              });
+          let col = 0;
+          while (col < row.length) {
+            const vLabel = String(raw[0][col + 2] || "").trim();
+            if (vLabel.startsWith("V") && vehicleMap[vLabel]) {
+              const partNumber = String(row[col] || "").trim();
+              const tubeLength = String(row[col + 1] || "").trim();
+              const targetQty = parseInt(String(row[col + 2])) || 0;
+              const palletLabel = String(row[col + 3] || "").trim();
+
+              if (partNumber && targetQty > 0) {
+                vehicleMap[vLabel].pallets.push({
+                  pallet_label: palletLabel || `p${vehicleMap[vLabel].pallets.length + 1}`,
+                  part_number: partNumber,
+                  tube_length: tubeLength,
+                  target_qty: targetQty,
+                  scanned_qty: 0,
+                  filled_quantity: 0,
+                  is_fulfilled: false,
+                });
+              }
             }
-            col += 2; vi++;
+            col += 4;
           }
         }
 
@@ -623,21 +631,7 @@ export default function DespatchPlanPage() {
           /* Read-only table view */
           <div className="space-y-4">
             <PlanTable vehicles={displayedVehicles} onPriorityChange={canEdit ? handlePriorityChange : undefined} />
-            {/* Summary */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {displayedVehicles.map(v => {
-                const total = v.pallets.reduce((s, p) => s + p.target_qty, 0);
-                const scanned = v.pallets.reduce((s, p) => s + p.scanned_qty, 0);
-                return (
-                  <div key={v.vehicle_label}
-                    className={`rounded-lg px-3 py-2 text-xs font-medium border ${v.is_completed ? "bg-green-100 text-green-800 border-green-300" : "bg-yellow-100 text-yellow-800 border-yellow-300"}`}>
-                    <div className="font-bold">{v.vehicle_label} — {v.customer || "No customer"}</div>
-                    <div>Target: {total} | Scanned: {scanned}</div>
-                    <div>{v.is_completed ? "✓ Complete" : `${v.pallets.filter(p => p.is_fulfilled).length}/${v.pallets.length} pallets`}</div>
-                  </div>
-                );
-              })}
-            </div>
+
           </div>
         ) : (
           /* Input form view */

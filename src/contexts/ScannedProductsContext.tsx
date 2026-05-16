@@ -4,6 +4,8 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import api from "@/lib/api";
 import { ScannedProduct, DailyScanSummary, ApiResponse } from "@/types/api";
 import { toast } from "sonner";
+import { getISTDate, getWorkingDate } from "@/lib/utils";
+import { useUser } from "@/contexts/UserContext";
 
 interface FetchScannedOptions {
   dispatch_date?: string;
@@ -103,7 +105,7 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const fetchDailySummary = async (date: string) => {
+  const fetchDailySummary = useCallback(async (date: string) => {
     try {
       const response = await api.get<ApiResponse<ScannedProduct[]>>(`/scanned-products?dispatch_date=${date}&limit=9999`);
       if (response.data.success && response.data.data) {
@@ -112,7 +114,7 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error("Failed to fetch daily summary", err);
     }
-  };
+  }, []);
 
   const fetchScanStats = useCallback(async (options?: FetchScannedOptions) => {
     try {

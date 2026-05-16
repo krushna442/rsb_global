@@ -27,15 +27,13 @@ const fmtDate = (d: string | null) => !d ? "—" : new Date(d).toLocaleDateStrin
 
 const getCustomerPrefix = (customer: string | null) => {
   if (!customer) return "";
-  const c = customer.toUpperCase();
-  if (c.includes("ALL ALW")) return "A";
-  if (c.includes("ALL PNR")) return "P";
-  if (c.includes("ALL HUSUR") || c.includes("ALL HOSUR")) return "H";
-  if (c.includes("IPLT")) return "I";
-  if (c.includes("SWITCH MOBILITY")) return "S";
-  if (c.includes("TML")) return "T";
-  if (c.includes("VECV")) return "V";
-  return "";
+  const c = customer.toUpperCase().trim();
+  const words = c.split(/\s+/).filter(Boolean);
+  if (words.length === 1) {
+    return words[0].slice(0, 1);
+  } else {
+    return words.map(w => w[0]).join("");
+  }
 };
 
 const TAB_COLORS = [
@@ -450,7 +448,7 @@ export default function DrawingsPage() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return drawings.filter(d => {
+    const result = drawings.filter(d => {
       const matchSearch = !q ||
         (d.drawing_number || "").toLowerCase().includes(q) ||
         (d.shaft || "").toLowerCase().includes(q) ||
@@ -459,21 +457,16 @@ export default function DrawingsPage() {
       const matchTab = !activeTab || (d.customer || "Unknown") === activeTab;
       return matchSearch && matchTab;
     });
+
+    // Natural sort by serial_number
+    return result.sort((a, b) => {
+      const snA = a.serial_number || "";
+      const snB = b.serial_number || "";
+      return snA.localeCompare(snB, undefined, { numeric: true, sensitivity: 'base' });
+    });
   }, [drawings, search, activeTab]);
 
-  const filteredWithSlNo = useMemo(() => {
-    const counts: Record<string, number> = {};
-    return filtered.map(d => {
-      const customer = d.customer || "Unknown";
-      const prefix = getCustomerPrefix(customer);
-      let slNo = "";
-      if (prefix) {
-        counts[customer] = (counts[customer] || 0) + 1;
-        slNo = `${prefix}${counts[customer]}`;
-      }
-      return { ...d, slNo };
-    });
-  }, [filtered]);
+  const filteredWithSlNo = filtered;
 
   const tabs = useMemo(() => {
     const fromData = Array.from(new Set(drawings.map(d => d.customer || "Unknown")));
