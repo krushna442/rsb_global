@@ -15,7 +15,7 @@ const SOP_VIDEO_TAB = "SOP Video";
 const API_BASE_URL = process.env.NEXT_PUBLIC_URL || "";
 
 // ── SOP Video Tab ─────────────────────────────────────────────────────────────
-function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
+function SopVideoTab({ isAdmin, search, langFilter }: { isAdmin: boolean; search: string; langFilter: LangFilter; }) {
   const [videos, setVideos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -23,6 +23,7 @@ function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState(0);
   const [playing, setPlaying] = useState<any | null>(null);
+  const [videoLang, setVideoLang] = useState("English");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -55,6 +56,7 @@ function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
         fd.append("title", title.trim());
         fd.append("fileName", file.name);
         fd.append("mimeType", file.type);
+        fd.append("language", videoLang);
         fd.append("chunk", chunk);
 
         await api.post(`/sop-videos/chunk?uploadId=${uploadId}&chunkIndex=${i}`, fd, { 
@@ -83,6 +85,15 @@ function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
     catch { toast.error("Delete failed"); }
   };
 
+  const filteredVideos = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return videos.filter(v => {
+      const matchSearch = !q || v.title.toLowerCase().includes(q);
+      const matchLang = langFilter === "ALL" || (v.language || "English") === langFilter;
+      return matchSearch && matchLang;
+    });
+  }, [videos, search, langFilter]);
+
   const streamUrl = (id: number) => `${API_BASE_URL}/api/sop-videos/stream/${id}`;
 
   return (
@@ -93,9 +104,13 @@ function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
           <p className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><Video className="w-4 h-4 text-rose-600" /> Upload SOP Video</p>
           <div className="flex flex-col sm:flex-row gap-3">
             <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Video title..." className="flex-1 h-9" />
+            <select value={videoLang} onChange={e => setVideoLang(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+              <option value="English">English</option>
+              <option value="Hindi">Hindi</option>
+            </select>
             <input ref={fileRef} type="file" accept="video/*" className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
             <Button variant="outline" size="sm" className="h-9" onClick={() => fileRef.current?.click()}>
-              <Upload className="w-3.5 h-3.5 mr-1.5" />{file ? file.name.slice(0, 20) + "..." : "Choose Video"}
+              {file ? file.name.slice(0, 20) + "..." : "Choose Video"}
             </Button>
             <Button size="sm" className="h-9 gap-1.5 min-w-[100px] relative overflow-hidden" onClick={handleUpload} disabled={uploading}>
               {uploading && (
@@ -113,11 +128,11 @@ function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
       {/* Video Grid */}
       {loading ? (
         <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin" /> Loading videos...</div>
-      ) : videos.length === 0 ? (
-        <div className="text-center py-20 text-muted-foreground text-sm">No SOP videos uploaded yet.</div>
+      ) : filteredVideos.length === 0 ? (
+        <div className="text-center py-20 text-muted-foreground text-sm">No SOP videos found.</div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-          {videos.map(v => (
+          {filteredVideos.map(v => (
             <div key={v.id} className="group relative bg-slate-900 rounded-xl overflow-hidden aspect-video shadow-md cursor-pointer hover:ring-2 hover:ring-rose-500 transition-all"
               onClick={() => setPlaying(v)}>
               <video src={streamUrl(v.id)} className="w-full h-full object-cover opacity-70" muted preload="metadata" />
@@ -126,6 +141,7 @@ function SopVideoTab({ isAdmin }: { isAdmin: boolean }) {
                   <Play className="w-6 h-6 text-white ml-0.5" />
                 </div>
                 <p className="text-white text-xs font-semibold text-center px-2 drop-shadow">{v.title}</p>
+                <span className={`px-2 py-0.5 rounded-full text-[9px] font-semibold text-white drop-shadow ${v.language === "Hindi" ? "bg-orange-500/80" : "bg-sky-600/80"}`}>{v.language || "English"}</span>
               </div>
               {isAdmin && (
                 <button onClick={e => { e.stopPropagation(); handleDelete(v.id); }}
@@ -162,7 +178,7 @@ interface ControlPlan {
   id: number; name: string; line: string; rev_no: string | null;
   rev_date: string | null; file_path: string | null; is_active: number;
   language: string; version: number; parent_id: number | null;
-  is_latest: number; sequence_number: number; created_by: string; created_at: string;
+  is_latest: number; sequence_number: number; remarks: string | null; created_by: string; created_at: string;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_URL || "";
@@ -214,33 +230,48 @@ function FileLink({ path }: { path: string | null }) {
 }
 
 // ── Add/Edit Modal ────────────────────────────────────────────────────────────
-function PlanModal({ open, onClose, editPlan, onSaved, lines }: {
-  open: boolean; onClose: () => void; editPlan: ControlPlan | null; onSaved: () => void; lines: string[];
+function PlanModal({ open, onClose, editPlan, onSaved, lines, onRefreshOptions }: {
+  open: boolean; onClose: () => void; editPlan: ControlPlan | null; onSaved: () => void; lines: string[]; onRefreshOptions: () => void;
 }) {
   const [name, setName] = useState(""); const [line, setLine] = useState(lines[0] || "");
   const [sequenceNo, setSequenceNo] = useState<number | "">("");
   const [revNo, setRevNo] = useState(""); const [revDate, setRevDate] = useState("");
   const [language, setLanguage] = useState("English"); const [file, setFile] = useState<File | null>(null);
+  const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
   const isEdit = !!editPlan;
 
   useEffect(() => {
-    if (editPlan) { setName(editPlan.name); setLine(editPlan.line); setSequenceNo(editPlan.sequence_number || 0); setRevNo(editPlan.rev_no || ""); setRevDate(editPlan.rev_date || ""); setLanguage(editPlan.language); }
-    else { setName(""); setLine(lines[0] || ""); setSequenceNo(""); setRevNo(""); setRevDate(""); setLanguage("English"); }
+    if (editPlan) { name ? null : setName(editPlan.name); setLine(editPlan.line); setSequenceNo(editPlan.sequence_number || 0); setRevNo(editPlan.rev_no || ""); setRevDate(editPlan.rev_date || ""); setLanguage(editPlan.language); setRemarks((editPlan as any).remarks || ""); }
+    else { setName(""); setLine(lines[0] || ""); setSequenceNo(""); setRevNo(""); setRevDate(""); setLanguage("English"); setRemarks(""); }
     setFile(null);
   }, [editPlan, open, lines]);
+
+  const handleDeleteLineOption = async () => {
+    if (!line) return;
+    if (!confirm(`Are you sure you want to remove the line option "${line}" from the dropdown list? This will not delete any existing control plans for this line.`)) return;
+    try {
+      await api.delete("/dynamic-fields/control-plan-names", { data: { names: [line] } });
+      toast.success("Option removed");
+      onRefreshOptions();
+      setLine(lines.filter(l => l !== line)[0] || "");
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Failed to remove option");
+    }
+  };
 
   const handleSave = async () => {
     if (!name.trim()) return toast.error("Name is required");
     setSaving(true);
     try {
       if (isEdit) {
-        await api.put(`/control-plans/${editPlan!.id}`, { name, line, rev_no: revNo, rev_date: revDate, language, sequence_number: Number(sequenceNo) || 0 });
+        await api.put(`/control-plans/${editPlan!.id}`, { name, line, rev_no: revNo, rev_date: revDate, language, sequence_number: Number(sequenceNo) || 0, remarks });
       } else {
         const fd = new FormData();
         fd.append("name", name.trim()); fd.append("line", line); fd.append("rev_no", revNo);
         fd.append("rev_date", revDate); fd.append("language", language);
         fd.append("sequence_number", (Number(sequenceNo) || 0).toString());
+        fd.append("remarks", remarks);
         if (file) fd.append("file", file);
         await api.post("/control-plans", fd, { headers: { "Content-Type": "multipart/form-data" } });
       }
@@ -256,9 +287,16 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines }: {
           <div><label className="text-xs font-semibold text-muted-foreground">Plan Name *</label><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. JOINT INTER AXLE" className="mt-1" disabled={isEdit} /></div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground">Line</label>
-            <select value={line} onChange={e => setLine(e.target.value)} className="w-full mt-1 border rounded-md px-3 py-2 text-sm bg-background">
-              {lines.map(l => <option key={l}>{l}</option>)}
-            </select>
+            <div className="flex gap-1.5 items-center mt-1">
+              <select value={line} onChange={e => setLine(e.target.value)} className="flex-1 border rounded-md px-3 py-2 text-sm bg-background h-9">
+                {lines.map(l => <option key={l}>{l}</option>)}
+              </select>
+              {line && (
+                <Button type="button" variant="outline" size="sm" className="h-9 w-9 px-0 border-red-200 hover:bg-red-50 text-red-500" onClick={handleDeleteLineOption}>
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
           </div>
           <div><label className="text-xs font-semibold text-muted-foreground">Sequence Number</label><Input type="number" value={sequenceNo} onChange={e => setSequenceNo(e.target.value === "" ? "" : Number(e.target.value))} className="mt-1" /></div>
           <div className="grid grid-cols-2 gap-3">
@@ -271,6 +309,7 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines }: {
               <option>English</option><option>Hindi</option>
             </select>
           </div>
+          <div><label className="text-xs font-semibold text-muted-foreground">Remarks</label><Input value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Enter remarks for this version..." className="mt-1" /></div>
           {!isEdit && <div><label className="text-xs font-semibold text-muted-foreground">File (optional)</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -284,12 +323,21 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines }: {
 
 function NewVersionModal({ plan, onClose, onSaved }: { plan: ControlPlan | null; onClose: () => void; onSaved: () => void; }) {
   const [revNo, setRevNo] = useState(""); const [revDate, setRevDate] = useState(new Date().toISOString().slice(0, 10));
+  const [remarks, setRemarks] = useState("");
   const [file, setFile] = useState<File | null>(null); const [saving, setSaving] = useState(false);
-  useEffect(() => { if (plan) setRevNo(plan.rev_no || ""); setFile(null); }, [plan]);
+  useEffect(() => { if (plan) { setRevNo(plan.rev_no || ""); setRemarks(""); } setFile(null); }, [plan]);
   const handleSave = async () => {
     if (!file) return toast.error("Please select a file");
     setSaving(true);
-    try { const fd = new FormData(); fd.append("rev_no", revNo); fd.append("rev_date", revDate); fd.append("file", file); await api.post(`/control-plans/${plan!.id}/new-version`, fd, { headers: { "Content-Type": "multipart/form-data" } }); toast.success("New version uploaded"); onSaved(); onClose(); } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); } finally { setSaving(false); }
+    try {
+      const fd = new FormData();
+      fd.append("rev_no", revNo);
+      fd.append("rev_date", revDate);
+      fd.append("remarks", remarks);
+      fd.append("file", file);
+      await api.post(`/control-plans/${plan!.id}/new-version`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success("New version uploaded"); onSaved(); onClose();
+    } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); } finally { setSaving(false); }
   };
   return (
     <Dialog open={!!plan} onOpenChange={o => !o && onClose()}>
@@ -300,6 +348,7 @@ function NewVersionModal({ plan, onClose, onSaved }: { plan: ControlPlan | null;
             <div><label className="text-xs font-semibold text-muted-foreground">Rev No</label><Input value={revNo} onChange={e => setRevNo(e.target.value)} className="mt-1" /></div>
             <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><Input type="date" value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
           </div>
+          <div><label className="text-xs font-semibold text-muted-foreground">Remarks <span className="text-amber-600">(required)</span></label><Input value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Describe changes in this new version..." className="mt-1 border-amber-300 focus:border-amber-500" /></div>
           <div><label className="text-xs font-semibold text-muted-foreground">File *</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>
           <div className="flex justify-end gap-2 pt-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}Upload</Button></div>
         </div>
@@ -334,8 +383,8 @@ function VersionsModal({ planId, onClose }: { planId: number | null; onClose: ()
 }
 
 function exportCSV(data: ControlPlan[], line: string) {
-  const headers = ["SR No.", "Plan Name", "Line", "Rev No.", "Rev Date", "Language", "Status", "Document", "Version"];
-  const rows = data.map((p, i) => [i + 1, p.name, p.line, p.rev_no || "", fmtDate(p.rev_date), p.language, p.is_active ? "Active" : "Inactive", p.file_path ? getFileUrl(p.file_path) : "", p.version]);
+  const headers = ["SR No.", "Plan Name", "Line", "Rev No.", "Rev Date", "Language", "Status", "Remarks", "Document", "Version"];
+  const rows = data.map((p, i) => [i + 1, p.name, p.line, p.rev_no || "", fmtDate(p.rev_date), p.language, p.is_active ? "Active" : "Inactive", p.remarks || "", p.file_path ? getFileUrl(p.file_path) : "", p.version]);
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob); const a = document.createElement("a");
@@ -368,12 +417,16 @@ export default function ControlPlanPage() {
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
-  useEffect(() => {
-    api.get("/dynamic-fields").then(r => {
-      const names: string[] = r.data.data?.control_plan_names || [];
-      setLines(names);
-    }).catch(() => {});
+  const fetchLines = useCallback(async () => {
+    try {
+      const r = await api.get("/dynamic-fields");
+      setLines(r.data.data?.control_plan_names || []);
+    } catch {}
   }, []);
+
+  useEffect(() => {
+    fetchLines();
+  }, [fetchLines]);
 
   const handleAddLine = async () => {
     if (!newLineName.trim()) return toast.error("Line name is required");
@@ -392,6 +445,19 @@ export default function ControlPlanPage() {
     if (!confirm("Delete this control plan?")) return;
     try { await api.delete(`/control-plans/${id}`); toast.success("Deleted"); fetchPlans(); }
     catch { toast.error("Delete failed"); }
+  };
+
+  const handleDeleteTab = async (lineName: string) => {
+    if (!confirm(`Warning: This will delete ALL control plans for line "${lineName}" from the database. This action cannot be undone.\n\nAre you sure you want to proceed?`)) return;
+    try {
+      await api.delete(`/control-plans/line/${encodeURIComponent(lineName)}`);
+      await api.delete("/dynamic-fields/control-plan-names", { data: { names: [lineName] } });
+      toast.success(`Deleted all records and option for ${lineName}`);
+      fetchLines();
+      fetchPlans();
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Failed to delete control plans");
+    }
   };
 
   const handleToggleActive = async (plan: ControlPlan) => {
@@ -441,7 +507,7 @@ export default function ControlPlanPage() {
             <p className="text-sm text-muted-foreground mt-0.5">Manufacturing control plans · Grouped by line</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {!isSopTab && (
+            {(
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input placeholder="Search plans..." className="pl-9 h-9 w-56 text-sm" value={search} onChange={e => setSearch(e.target.value)} />
@@ -449,20 +515,20 @@ export default function ControlPlanPage() {
             )}
 
             {/* Language Toggle */}
-            {!isSopTab && <LangToggle value={langFilter} onChange={setLangFilter} />}
+            {<LangToggle value={langFilter} onChange={setLangFilter} />}
 
-            {isAdmin && !isSopTab && (
+            {isAdmin && (
               <Button size="sm" variant={showInactive ? "default" : "outline"} className="h-9 text-xs gap-1.5" onClick={() => setShowInactive(!showInactive)}>
                 <Power className="w-3.5 h-3.5" />{showInactive ? "Hide" : "Show"} Inactive
               </Button>
             )}
-            {!isSopTab && (
+            {(
               <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5" onClick={() => exportCSV(filtered, activeTab)}>
                 <Download className="w-3.5 h-3.5" />Export CSV
               </Button>
             )}
-            {isAdmin && !isSopTab && <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5" onClick={() => setIsAddLineOpen(true)}><Plus className="w-3.5 h-3.5" />Add Line</Button>}
-            {isAdmin && !isSopTab && <Button size="sm" className="h-9 text-xs gap-1.5" onClick={() => setAddOpen(true)}><Plus className="w-3.5 h-3.5" />Add Plan</Button>}
+            {isAdmin && <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5" onClick={() => setIsAddLineOpen(true)}><Plus className="w-3.5 h-3.5" />Add Line</Button>}
+            {isAdmin && <Button size="sm" className="h-9 text-xs gap-1.5" onClick={() => setAddOpen(true)}><Plus className="w-3.5 h-3.5" />Add Plan</Button>}
           </div>
         </div>
 
@@ -474,19 +540,26 @@ export default function ControlPlanPage() {
             const color = isSop ? { active: "bg-rose-600 text-white", badge: "bg-white/30" } : TAB_COLORS[colorIdx];
             const isActive = activeTab === tab;
             return (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition-all -mb-px flex items-center gap-1.5 ${isActive ? color.active + " border border-b-0 shadow-sm" : "bg-background border-transparent text-muted-foreground hover:text-foreground border"}`}>
-                {isSop && <Video className="w-3 h-3" />}
-                {tab}
-                {!isSop && <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? color.badge : "bg-muted"}`}>{tabCount[tab] || 0}</span>}
-              </button>
+              <div key={tab} className="relative group/tab flex">
+                <button onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition-all -mb-px flex items-center gap-1.5 ${isActive ? color.active + " border border-b-0 shadow-sm" : "bg-background border-transparent text-muted-foreground hover:text-foreground border"}`}>
+                  {isSop && <Video className="w-3 h-3" />}
+                  {tab}
+                  {!isSop && <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? color.badge : "bg-muted"}`}>{tabCount[tab] || 0}</span>}
+                  {isAdmin && !isSop && (
+                    <span onClick={(e) => { e.stopPropagation(); handleDeleteTab(tab); }} className="w-3.5 h-3.5 rounded-full flex items-center justify-center bg-red-500/20 hover:bg-red-500 hover:text-white text-red-500 cursor-pointer ml-1 transition" title={`Delete all control plans for ${tab}`}>
+                      <X className="w-2.5 h-2.5" />
+                    </span>
+                  )}
+                </button>
+              </div>
             );
           })}
         </div>
 
         {/* SOP Video Tab */}
         {isSopTab ? (
-          <SopVideoTab isAdmin={isAdmin} />
+          <SopVideoTab isAdmin={isAdmin} search={search} langFilter={langFilter} />
         ) : loading ? (
           <div className="flex items-center justify-center py-24 gap-2 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin" />Loading control plans...</div>
         ) : filtered.length === 0 ? (
@@ -504,6 +577,7 @@ export default function ControlPlanPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Rev Date</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Language</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Remarks</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Document</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Ver.</th>
                     {isAdmin && <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Actions</th>}
@@ -531,6 +605,7 @@ export default function ControlPlanPage() {
                           {p.is_active ? "Active" : "Inactive"}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground max-w-[150px] truncate">{p.remarks || "—"}</td>
                       <td className="px-4 py-3"><FileLink path={p.file_path} /></td>
                       <td className="px-4 py-3"><Badge variant="outline" className="text-[10px]">v{p.version}</Badge></td>
                       {isAdmin && (
@@ -561,8 +636,8 @@ export default function ControlPlanPage() {
         )}
       </div>
 
-      <PlanModal open={addOpen} onClose={() => setAddOpen(false)} editPlan={null} onSaved={fetchPlans} lines={lines} />
-      <PlanModal open={!!editPlan} onClose={() => setEditPlan(null)} editPlan={editPlan} onSaved={fetchPlans} lines={lines} />
+      <PlanModal open={addOpen} onClose={() => setAddOpen(false)} editPlan={null} onSaved={fetchPlans} lines={lines} onRefreshOptions={fetchLines} />
+      <PlanModal open={!!editPlan} onClose={() => setEditPlan(null)} editPlan={editPlan} onSaved={fetchPlans} lines={lines} onRefreshOptions={fetchLines} />
       <NewVersionModal plan={newVerPlan} onClose={() => setNewVerPlan(null)} onSaved={fetchPlans} />
       <VersionsModal planId={versionsPlanId} onClose={() => setVersionsPlanId(null)} />
 

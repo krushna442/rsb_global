@@ -90,11 +90,9 @@ export function ScannedProductsProvider({ children }: { children: ReactNode }) {
 
   const fetchTodayScannedProducts = useCallback(async () => {
     try {
-      const now = new Date();
-      // IST is UTC+5.5. If current time is < 6AM, we want previous day's record.
-      const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
-      if (ist.getUTCHours() < 6) ist.setUTCDate(ist.getUTCDate() - 1);
-      const dateStr = ist.toISOString().slice(0, 10);
+      const dateStr = new Date().toLocaleDateString("en-CA", {
+        timeZone: "Asia/Kolkata",
+      });  
 
       const response = await api.get<ApiResponse<ScannedProduct[]>>(`/scanned-products?dispatch_date=${dateStr}&limit=9999`);
       if (response.data.success && response.data.data) {

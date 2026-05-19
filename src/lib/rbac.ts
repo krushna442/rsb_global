@@ -23,25 +23,7 @@ export const ALL_ROUTES = [
 export const ROLE_ACCESS: Record<string, string[]> = {
     "super admin": ALL_ROUTES,
     
-    "admin": [
-        "/",
-        "/product-master",
-        "/production-verification",
-        "/documents",
-        "/product-specifications",
-        "/dynamic-fields",
-        "/scanned-products",
-        "/users",
-        "/settings",
-        "/pdi-partreport",
-        "/control-plan",
-        "/drawings",
-        "/standards",
-        "/bearing-cup-plan",
-        "/hourly-production",
-        "/despatch-plan",
-        "/skill-matrix",
-    ],
+    "admin": ALL_ROUTES,
     
     "production": [
         "/",

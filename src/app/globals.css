@@ -168,3 +168,32 @@
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
+
+/* Print styles — used by Skill Matrix PDF download */
+@media print {
+  /* Hide navigation and action buttons */
+  nav, aside, header,
+  [data-sidebar],
+  button, .no-print {
+    display: none !important;
+  }
+
+  /* Full-width content */
+  main, body, html {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Keep backgrounds and colors */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Page breaks between machine cards */
+  .skill-machine-card {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}

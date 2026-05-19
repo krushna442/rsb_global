@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
-import { Plus, Pencil, Trash2, Loader2, User, ChevronDown, ChevronUp, X, Award, Calendar, Settings, Star } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, User, ChevronDown, ChevronUp, X, Award, Calendar, Settings, Star, Download, BarChart2 } from "lucide-react";
 
 interface Person {
   id: number; machine_id: number; name: string; department: string | null;
@@ -215,6 +215,49 @@ function MachineModal({ open, onClose, editMachine, onSaved }: { open: boolean; 
   );
 }
 
+// ── Skill Graph Component ─────────────────────────────────────────────────────
+function SkillGraph({ machines }: { machines: Machine[] }) {
+  const maxVal = Math.max(1, ...machines.map(m => m.persons.length));
+  const colors = ["#6b7280","#ef4444","#ec4899","#f59e0b","#10b981"];
+  return (
+    <div className="border rounded-2xl overflow-hidden bg-white shadow-sm">
+      <div className="px-5 py-3.5 bg-gradient-to-r from-slate-800 to-slate-700 flex items-center gap-2">
+        <BarChart2 className="w-4 h-4 text-slate-300" />
+        <h3 className="font-bold text-white text-sm">Skill Level Distribution by Machine</h3>
+      </div>
+      <div className="p-5 overflow-x-auto">
+        <div className="flex gap-2 min-w-max">
+          {machines.map(m => {
+            const levelDist = [0,1,2,3,4].map(l => m.persons.filter(p => p.skill_level === l).length);
+            return (
+              <div key={m.id} className="flex flex-col items-center gap-1 min-w-[80px]">
+                <div className="flex items-end gap-0.5 h-28">
+                  {levelDist.map((cnt, l) => (
+                    <div key={l} title={`Level ${l}: ${cnt} persons`}
+                      className="w-8 rounded-t transition-all hover:opacity-80"
+                      style={{ height: `${maxVal > 0 ? (cnt / maxVal) * 100 : 0}%`, backgroundColor: colors[l], minHeight: cnt > 0 ? '4px' : '0' }}
+                    />
+                  ))}
+                </div>
+                <p className="text-[9px] font-semibold text-slate-600 text-center leading-tight max-w-[80px] truncate">{m.machine_name}</p>
+                <p className="text-[9px] text-slate-400">{m.persons.length} persons</p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-3 mt-4 flex-wrap">
+          {[0,1,2,3,4].map(l => (
+            <span key={l} className="flex items-center gap-1 text-xs text-slate-600">
+              <span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: colors[l] }} />
+              Level {l} — {SKILL_CONFIG[l].short.split("·")[0].trim()}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SkillMatrixPage() {
   const { user } = useUser();
   const canEdit = ["admin", "super admin"].includes(user?.role || "");
@@ -228,6 +271,7 @@ export default function SkillMatrixPage() {
   const [activeMachineId, setActiveMachineId] = useState<number | null>(null);
   const [detailPerson, setDetailPerson] = useState<Person | null>(null);
   const [detailMachine, setDetailMachine] = useState<Machine | null>(null);
+  const [showGraph, setShowGraph] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -239,6 +283,8 @@ export default function SkillMatrixPage() {
   const toggleCollapse = (id: number) => setCollapsed(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   const deleteMachine = async (id: number) => { if (!confirm("Delete machine and all its persons?")) return; try { await api.delete(`/skill-matrix/${id}`); toast.success("Deleted"); load(); } catch { toast.error("Failed"); } };
   const deletePerson = async (id: number) => { if (!confirm("Remove person?")) return; try { await api.delete(`/skill-matrix/persons/${id}`); toast.success("Removed"); load(); } catch { toast.error("Failed"); } };
+
+  const handlePrintPDF = () => window.print();
 
   // Stats
   const totalPersons = machines.reduce((s, m) => s + m.person_count, 0);
@@ -253,7 +299,11 @@ export default function SkillMatrixPage() {
             <h1 className="text-2xl font-bold tracking-tight">Skill Matrix</h1>
             <p className="text-sm text-muted-foreground mt-0.5">{machines.length} machines · {totalPersons} authorised persons</p>
           </div>
-          {canEdit && <Button size="sm" className="gap-1.5 h-9 text-xs" onClick={() => { setEditMachine(null); setMachineModal(true); }}><Plus className="w-3.5 h-3.5" />Add Machine</Button>}
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="gap-1.5 h-9 text-xs" onClick={() => setShowGraph(g => !g)}><BarChart2 className="w-3.5 h-3.5" />{showGraph ? "Hide" : "Show"} Graph</Button>
+            <Button size="sm" variant="outline" className="gap-1.5 h-9 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={handlePrintPDF}><Download className="w-3.5 h-3.5" />Download PDF</Button>
+            {canEdit && <Button size="sm" className="gap-1.5 h-9 text-xs" onClick={() => { setEditMachine(null); setMachineModal(true); }}><Plus className="w-3.5 h-3.5" />Add Machine</Button>}
+          </div>
         </div>
 
         {/* Level Summary Bar */}
@@ -311,7 +361,7 @@ export default function SkillMatrixPage() {
                         No persons added. {canEdit && <button onClick={() => { setActiveMachineId(m.id); setEditPerson(null); setPersonModal(true); }} className="text-primary underline ml-1">Add first person.</button>}
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-5">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 print:grid-cols-6 gap-4 p-5">
                         {m.persons.map(p => (
                           <PersonCard key={p.id} person={p} onClick={() => { setDetailPerson(p); setDetailMachine(m); }} />
                         ))}
@@ -323,6 +373,9 @@ export default function SkillMatrixPage() {
             })}
           </div>
         )}
+
+        {/* Graph */}
+        {showGraph && machines.length > 0 && <SkillGraph machines={machines} />}
 
         {/* Skill Level Guidelines */}
         <div className="border rounded-2xl overflow-hidden bg-white shadow-sm">

@@ -58,8 +58,8 @@ function FileLink({ path, label }: { path: string | null; label: string }) {
 }
 
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
-function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames }: {
-  open: boolean; onClose: () => void; editDrawing: Drawing | null; onSaved: () => void; customerNames: string[];
+function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames, onRefreshOptions }: {
+  open: boolean; onClose: () => void; editDrawing: Drawing | null; onSaved: () => void; customerNames: string[]; onRefreshOptions: () => void;
 }) {
   const [form, setForm] = useState({ drawing_number: "", shaft: "", joint: "", customer: "", modification_number: "", remarks: "" });
   const [partNumbers, setPartNumbers] = useState<string[]>([""]);
@@ -82,6 +82,19 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames }: {
     }
     setFile(null); setBomFile(null);
   }, [editDrawing, open, customerNames]);
+
+  const handleDeleteCustomerOption = async () => {
+    if (!form.customer) return;
+    if (!confirm(`Are you sure you want to remove the customer option "${form.customer}" from the dropdown list? This will not delete any existing drawings for this customer.`)) return;
+    try {
+      await api.delete("/dynamic-fields/customer-names", { data: { names: [form.customer] } });
+      toast.success("Option removed");
+      onRefreshOptions();
+      setForm(f => ({ ...f, customer: customerNames.filter(c => c !== form.customer)[0] || "" }));
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Failed to remove option");
+    }
+  };
 
   const handlePartNumberChange = (index: number, value: string) => {
     setPartNumbers(prev => prev.map((p, i) => i === index ? value : p));
@@ -168,9 +181,16 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames }: {
           </div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground">Customer</label>
-            <select value={form.customer} onChange={e => setForm(f => ({ ...f, customer: e.target.value }))} className="w-full mt-1 border rounded-md px-3 py-2 text-sm bg-background">
-              {customerNames.map(c => <option key={c}>{c}</option>)}
-            </select>
+            <div className="flex gap-1.5 items-center mt-1">
+              <select value={form.customer} onChange={e => setForm(f => ({ ...f, customer: e.target.value }))} className="flex-1 border rounded-md px-3 py-2 text-sm bg-background h-9">
+                {customerNames.map(c => <option key={c}>{c}</option>)}
+              </select>
+              {form.customer && (
+                <Button type="button" variant="outline" size="sm" className="h-9 w-9 px-0 border-red-200 hover:bg-red-50 text-red-500" onClick={handleDeleteCustomerOption}>
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
           </div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground">Description (Shaft)</label>
@@ -371,6 +391,21 @@ function VersionsModal({ drawingId, onClose }: { drawingId: number | null; onClo
   );
 }
 
+// ── Download All Drawings ───────────────────────────────────────────────────
+function downloadAllDrawings(data: Drawing[]) {
+  const withFiles = data.filter(d => d.file_path);
+  if (withFiles.length === 0) { return; }
+  withFiles.forEach((d, i) => {
+    setTimeout(() => {
+      const a = document.createElement("a");
+      a.href = getFileUrl(d.file_path!);
+      a.target = "_blank";
+      a.rel = "noreferrer";
+      a.click();
+    }, i * 300);
+  });
+}
+
 // ── Export to CSV ─────────────────────────────────────────────────────────────
 function exportCSV(data: Drawing[], customer: string) {
   const headers = ["Sl No.", "Drawing Number", "Description", "Joint", "Part Number(s)", "Customer", "Mod Number", "Mod Date", "Remarks", "Drawing", "BOM"];
@@ -420,12 +455,16 @@ export default function DrawingsPage() {
 
   useEffect(() => { fetchDrawings(); }, [fetchDrawings]);
 
-  useEffect(() => {
-    api.get("/dynamic-fields").then(r => {
-      const names: string[] = r.data.data?.customer_names || [];
-      setCustomerNames(names);
-    }).catch(() => {});
+  const fetchCustomerNames = useCallback(async () => {
+    try {
+      const r = await api.get("/dynamic-fields");
+      setCustomerNames(r.data.data?.customer_names || []);
+    } catch {}
   }, []);
+
+  useEffect(() => {
+    fetchCustomerNames();
+  }, [fetchCustomerNames]);
 
   const handleAddCustomer = async () => {
     if (!newCustomerName.trim()) return toast.error("Customer name is required");
@@ -446,6 +485,19 @@ export default function DrawingsPage() {
     catch { toast.error("Delete failed"); }
   };
 
+  const handleDeleteTab = async (customerName: string) => {
+    if (!confirm(`Warning: This will delete ALL drawings for customer "${customerName}" from the database. This action cannot be undone.\n\nAre you sure you want to proceed?`)) return;
+    try {
+      await api.delete(`/drawings/customer/${encodeURIComponent(customerName)}`);
+      await api.delete("/dynamic-fields/customer-names", { data: { names: [customerName] } });
+      toast.success(`Deleted all records and option for ${customerName}`);
+      fetchCustomerNames();
+      fetchDrawings();
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Failed to delete drawings");
+    }
+  };
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     const result = drawings.filter(d => {
@@ -454,7 +506,7 @@ export default function DrawingsPage() {
         (d.shaft || "").toLowerCase().includes(q) ||
         (d.part_number || "").toLowerCase().includes(q) ||
         (d.modification_number || "").toLowerCase().includes(q);
-      const matchTab = !activeTab || (d.customer || "Unknown") === activeTab;
+      const matchTab = !activeTab || activeTab === "ALL" || (d.customer || "Unknown") === activeTab;
       return matchSearch && matchTab;
     });
 
@@ -473,7 +525,7 @@ export default function DrawingsPage() {
     const ordered = customerNames.length > 0
       ? [...customerNames.filter(n => fromData.includes(n)), ...fromData.filter(n => !customerNames.includes(n))]
       : fromData;
-    return ordered;
+    return ["ALL", ...ordered];
   }, [drawings, customerNames]);
 
   useEffect(() => {
@@ -517,10 +569,18 @@ export default function DrawingsPage() {
             const color = TAB_COLORS[colorIdx];
             const isActive = activeTab === tab;
             return (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-all ${isActive ? color.active + " -mb-px border-b-0 shadow-sm" : "bg-background border-transparent text-muted-foreground hover:text-foreground"}`}>
-                {tab} <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? "bg-white/30" : "bg-muted"}`}>{tabCount[tab] || 0}</span>
-              </button>
+              <div key={tab} className="relative group/tab flex">
+                <button onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-all flex items-center gap-1.5 ${isActive ? color.active + " -mb-px border-b-0 shadow-sm" : "bg-background border-transparent text-muted-foreground hover:text-foreground"}`}>
+                  {tab === "ALL" ? "ALL Drawings" : tab}
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? "bg-white/30" : "bg-muted"}`}>{tabCount[tab] || 0}</span>
+                  {isAdmin && tab !== "ALL" && (
+                    <span onClick={(e) => { e.stopPropagation(); handleDeleteTab(tab); }} className="w-3.5 h-3.5 rounded-full flex items-center justify-center bg-red-500/20 hover:bg-red-505 hover:bg-red-500 hover:text-white text-red-500 cursor-pointer ml-1 transition" title={`Delete all drawings for ${tab}`}>
+                      <X className="w-2.5 h-2.5" />
+                    </span>
+                  )}
+                </button>
+              </div>
             );
           })}
         </div>
@@ -543,7 +603,6 @@ export default function DrawingsPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Description</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Joint</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Part Number(s)</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Customer</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Mod No.</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Mod Date</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Remarks</th>
@@ -568,9 +627,6 @@ export default function DrawingsPage() {
                             ))}
                           </div>
                         ) : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-xs">
-                        <span className="bg-slate-100 text-slate-700 rounded px-2 py-0.5 font-medium">{d.customer || "—"}</span>
                       </td>
                       <td className="px-4 py-3 text-xs font-semibold">{d.modification_number || "—"}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{fmtDate(d.modification_date)}</td>
@@ -600,8 +656,8 @@ export default function DrawingsPage() {
         )}
       </div>
 
-      <DrawingModal open={addOpen} onClose={() => setAddOpen(false)} editDrawing={null} onSaved={fetchDrawings} customerNames={customerNames} />
-      <DrawingModal open={!!editDrawing} onClose={() => setEditDrawing(null)} editDrawing={editDrawing} onSaved={fetchDrawings} customerNames={customerNames} />
+      <DrawingModal open={addOpen} onClose={() => setAddOpen(false)} editDrawing={null} onSaved={fetchDrawings} customerNames={customerNames} onRefreshOptions={fetchCustomerNames} />
+      <DrawingModal open={!!editDrawing} onClose={() => setEditDrawing(null)} editDrawing={editDrawing} onSaved={fetchDrawings} customerNames={customerNames} onRefreshOptions={fetchCustomerNames} />
       <NewVersionModal drawing={newVerDrawing} onClose={() => setNewVerDrawing(null)} onSaved={fetchDrawings} />
       <VersionsModal drawingId={versionsId} onClose={() => setVersionsId(null)} />
       

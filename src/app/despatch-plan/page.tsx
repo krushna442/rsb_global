@@ -10,7 +10,7 @@ import { useUser } from "@/contexts/UserContext";
 import { useScannedProducts } from "@/contexts/ScannedProductsContext";
 import {
   Plus, Save, Loader2, Trash2, AlertTriangle, CheckCircle2,
-  Truck, Download, Upload, FileSpreadsheet, X,
+  Truck, Download, Upload, FileSpreadsheet, X, BarChart2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
@@ -289,6 +289,131 @@ function IncompleteBanner({ vehicles }: { vehicles: any[] }) {
     </div>
   );
 }
+
+// ── Graphs Tab ─────────────────────────────────────────────────────────
+function GraphsTab() {
+  const today = new Date().toISOString().slice(0, 10);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const [from, setFrom] = useState(sevenDaysAgo);
+  const [to, setTo] = useState(today);
+  const [loading, setLoading] = useState(false);
+  const [graphData, setGraphData] = useState<any>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  const loadGraph = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get(`/despatch-plan/graph?from=${from}&to=${to}`);
+      setGraphData(res.data);
+    } catch { toast.error("Failed to load graph data"); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadGraph(); }, []);
+
+  const handleRangeDownload = async () => {
+    setDownloading(true);
+    try {
+      const res = await api.get(`/despatch-plan/export-range?from=${from}&to=${to}`, { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url; a.download = `despatch_${from}_to_${to}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Excel downloaded");
+    } catch { toast.error("Download failed"); }
+    finally { setDownloading(false); }
+  };
+
+  const vpd = graphData?.vehiclesPerDay || [];
+  const pnw = graphData?.partNumberWise || [];
+  const maxVpd = Math.max(1, ...vpd.map((d: any) => Number(d.total_vehicles)));
+  const maxPnw = Math.max(1, ...pnw.map((d: any) => Number(d.total_despatched)));
+
+  return (
+    <div className="space-y-6">
+      {/* Date range controls */}
+      <div className="flex flex-wrap items-end gap-3 bg-white border rounded-xl p-4 shadow-sm">
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground block mb-1">From Date</label>
+          <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="h-9 text-sm w-40" />
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground block mb-1">To Date</label>
+          <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="h-9 text-sm w-40" />
+        </div>
+        <Button size="sm" className="h-9 text-xs gap-1.5" onClick={loadGraph} disabled={loading}>
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BarChart2 className="w-3.5 h-3.5" />}
+          Load Graph
+        </Button>
+        <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={handleRangeDownload} disabled={downloading}>
+          {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+          Download Range Excel
+        </Button>
+      </div>
+
+      {/* Vehicles per day chart */}
+      <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+        <div className="px-5 py-3.5 bg-gradient-to-r from-slate-800 to-slate-700">
+          <h3 className="font-bold text-white text-sm">Vehicles Despatched Per Day</h3>
+        </div>
+        <div className="p-5 overflow-x-auto">
+          {vpd.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">No data for selected range</p>
+          ) : (
+            <div className="flex items-end gap-3 min-w-max h-48">
+              {vpd.map((d: any, i: number) => {
+                const total = Number(d.total_vehicles) || 0;
+                const completed = Number(d.completed_vehicles) || 0;
+                const dateStr = typeof d.plan_date === 'string' ? d.plan_date : new Date(d.plan_date).toISOString().slice(0,10);
+                return (
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-700">{total}</span>
+                    <div className="w-12 flex flex-col justify-end" style={{ height: '140px' }}>
+                      <div className="w-full rounded-t-sm bg-blue-500 transition-all" style={{ height: `${(total/maxVpd)*140}px` }} title={`Total: ${total}`} />
+                    </div>
+                    <span className="text-[9px] text-slate-500 text-center">{dateStr.slice(5)}</span>
+                    <span className="text-[9px] text-green-600">{completed}✓</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Part number wise chart */}
+      <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+        <div className="px-5 py-3.5 bg-gradient-to-r from-slate-800 to-slate-700">
+          <h3 className="font-bold text-white text-sm">Part Number Wise Despatched Pieces</h3>
+        </div>
+        <div className="p-5 overflow-x-auto">
+          {pnw.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">No data for selected range</p>
+          ) : (
+            <div className="space-y-2">
+              {pnw.slice(0, 20).map((d: any, i: number) => {
+                const val = Number(d.total_despatched) || 0;
+                const target = Number(d.total_target) || 0;
+                const pct = maxPnw > 0 ? (val / maxPnw) * 100 : 0;
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-xs font-mono w-28 truncate text-right text-slate-600">{d.part_number}</span>
+                    <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full transition-all flex items-center justify-end pr-2" style={{ width: `${pct}%` }}>
+                        <span className="text-[10px] text-white font-bold">{val}</span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-slate-400 w-14 text-left">/ {target}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function DespatchPlanPage() {
   const { user } = useUser();
@@ -306,6 +431,7 @@ export default function DespatchPlanPage() {
   const [customerOptions, setCustomerOptions] = useState<string[]>([]);
   const [planExists, setPlanExists] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [activeMainTab, setActiveMainTab] = useState<"plan"|"graphs">("plan");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Download Matrix Template
@@ -563,12 +689,16 @@ export default function DespatchPlanPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <input
-              type="date" value={planDate}
-              onChange={e => setPlanDate(e.target.value)}
-              className="text-sm border rounded-md px-3 py-1.5 h-9"
-            />
+            {/* Main Tab Toggle */}
+            <div className="flex items-center rounded-lg border overflow-hidden h-9 divide-x text-xs font-semibold">
+              <button onClick={() => setActiveMainTab("plan")} className={`px-3 h-full transition-colors ${activeMainTab === "plan" ? "bg-slate-800 text-white" : "bg-background text-muted-foreground hover:bg-muted/60"}`}>Plan</button>
+              <button onClick={() => setActiveMainTab("graphs")} className={`px-3 h-full transition-colors flex items-center gap-1 ${activeMainTab === "graphs" ? "bg-slate-800 text-white" : "bg-background text-muted-foreground hover:bg-muted/60"}`}><BarChart2 className="w-3 h-3" />Graphs</button>
+            </div>
 
+            {/* Plan-tab-only controls */}
+            {activeMainTab === "plan" && (
+              <>
+                <input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} className="text-sm border rounded-md px-3 py-1.5 h-9" />
             {/* Import */}
             {canEdit && (!planExists || isEditing) && (
               <>
@@ -605,58 +735,54 @@ export default function DespatchPlanPage() {
                 Save Plan
               </Button>
             )}
+              </>
+            )}
           </div>
         </div>
 
-        {/* Legend */}
-        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-400 inline-block" />In Progress</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-green-500 inline-block" />Complete</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block" />Pallet Fulfilled</span>
-          {planExists && (
-            <span className="flex items-center gap-1.5 ml-auto text-amber-700 font-medium">
-              🔒 Viewing saved plan — Syncing with today's scans automatically
-            </span>
-          )}
-        </div>
-
-        {/* Previous day incomplete */}
-        <IncompleteBanner vehicles={incompleteFromPrev} />
-
-        {loading ? (
-          <div className="flex items-center justify-center py-24 gap-2 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin" /> Loading despatch plan...
-          </div>
-        ) : planExists && !isEditing ? (
-          /* Read-only table view */
-          <div className="space-y-4">
-            <PlanTable vehicles={displayedVehicles} onPriorityChange={canEdit ? handlePriorityChange : undefined} />
-
-          </div>
+        {activeMainTab === "graphs" ? (
+          <GraphsTab />
         ) : (
-          /* Input form view */
-          <div className="bg-white border rounded-xl shadow-sm p-4">
-            <div className="flex gap-3 overflow-x-auto pb-2 items-start">
-              {vehicles.map((v, idx) => (
-                <VehicleCard
-                  key={idx} idx={idx} vehicle={v} canEdit={canEdit}
-                  customerOptions={customerList}
-                  onChange={nv => updateVehicle(idx, nv)}
-                  onRemove={() => removeVehicle(idx)}
-                />
-              ))}
-              {canEdit && (
-                <div className="flex flex-col items-center justify-start pt-2 min-w-[90px]">
-                  <Button variant="outline" size="sm"
-                    className="h-10 w-10 p-0 rounded-full border-2 border-dashed border-blue-400 text-blue-500 hover:bg-blue-50"
-                    onClick={addVehicle}>
-                    <Plus className="w-5 h-5" />
-                  </Button>
-                  <span className="text-xs text-muted-foreground mt-1">Add Vehicle</span>
-                </div>
+          <>
+            {/* Legend */}
+            <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-400 inline-block" />In Progress</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-green-500 inline-block" />Complete</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block" />Pallet Fulfilled</span>
+              {planExists && (
+                <span className="flex items-center gap-1.5 ml-auto text-amber-700 font-medium">
+                  🔒 Viewing saved plan — Syncing with today's scans automatically
+                </span>
               )}
             </div>
-          </div>
+
+            {/* Previous day incomplete */}
+            <IncompleteBanner vehicles={incompleteFromPrev} />
+
+            {loading ? (
+              <div className="flex items-center justify-center py-24 gap-2 text-muted-foreground">
+                <Loader2 className="w-5 h-5 animate-spin" /> Loading despatch plan...
+              </div>
+            ) : planExists && !isEditing ? (
+              <div className="space-y-4">
+                <PlanTable vehicles={displayedVehicles} onPriorityChange={handlePriorityChange} />
+              </div>
+            ) : (
+              <div className="bg-white border rounded-xl shadow-sm p-4">
+                <div className="flex gap-3 overflow-x-auto pb-2 items-start">
+                  {vehicles.map((v, idx) => (
+                    <VehicleCard key={idx} idx={idx} vehicle={v} canEdit={canEdit} customerOptions={customerList} onChange={nv => updateVehicle(idx, nv)} onRemove={() => removeVehicle(idx)} />
+                  ))}
+                  {canEdit && (
+                    <div className="flex flex-col items-center justify-start pt-2 min-w-[90px]">
+                      <Button variant="outline" size="sm" className="h-10 w-10 p-0 rounded-full border-2 border-dashed border-blue-400 text-blue-500 hover:bg-blue-50" onClick={addVehicle}><Plus className="w-5 h-5" /></Button>
+                      <span className="text-xs text-muted-foreground mt-1">Add Vehicle</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </DashboardLayout>

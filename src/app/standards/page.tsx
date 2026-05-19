@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
-import { Plus, Pencil, Trash2, Upload, History, Search, Loader2, Download, File as FileIcon } from "lucide-react";
+import { Plus, Pencil, Trash2, Upload, History, Search, Loader2, Download, File as FileIcon, X } from "lucide-react";
 
 interface Standard {
   id: number; standard_no: string; description: string | null;
@@ -41,8 +41,8 @@ function FileLink({ path }: { path: string | null }) {
 }
 
 // ── Add/Edit Modal ────────────────────────────────────────────────────────────
-function StandardModal({ open, onClose, editStandard, onSaved, categories }: {
-  open: boolean; onClose: () => void; editStandard: Standard | null; onSaved: () => void; categories: string[];
+function StandardModal({ open, onClose, editStandard, onSaved, categories, onRefreshOptions }: {
+  open: boolean; onClose: () => void; editStandard: Standard | null; onSaved: () => void; categories: string[]; onRefreshOptions: () => void;
 }) {
   const [form, setForm] = useState({ standard_no: "", description: "", rev_number: "", rev_date: "", comment: "", category: "", remarks: "" });
   const [file, setFile] = useState<File | null>(null);
@@ -59,6 +59,19 @@ function StandardModal({ open, onClose, editStandard, onSaved, categories }: {
     }
     setFile(null);
   }, [editStandard, open, categories]);
+
+  const handleDeleteCategoryOption = async () => {
+    if (!form.category) return;
+    if (!confirm(`Are you sure you want to remove the category option "${form.category}" from the dropdown list? This will not delete any existing standards for this category.`)) return;
+    try {
+      await api.delete("/dynamic-fields/standard-names", { data: { names: [form.category] } });
+      toast.success("Option removed");
+      onRefreshOptions();
+      setForm(f => ({ ...f, category: categories.filter(c => c !== form.category)[0] || "" }));
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Failed to remove option");
+    }
+  };
 
   const handleSave = async () => {
     if (!form.standard_no.trim()) return toast.error("Standard No is required");
@@ -118,9 +131,16 @@ function StandardModal({ open, onClose, editStandard, onSaved, categories }: {
           </div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground">Category</label>
-            <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="w-full mt-1 border rounded-md px-3 py-2 text-sm bg-background">
-              {categories.map(c => <option key={c}>{c}</option>)}
-            </select>
+            <div className="flex gap-1.5 items-center mt-1">
+              <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="flex-1 border rounded-md px-3 py-2 text-sm bg-background h-9">
+                {categories.map(c => <option key={c}>{c}</option>)}
+              </select>
+              {form.category && (
+                <Button type="button" variant="outline" size="sm" className="h-9 w-9 px-0 border-red-200 hover:bg-red-50 text-red-500" onClick={handleDeleteCategoryOption}>
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
           </div>
           <div className="col-span-2">
             <label className="text-xs font-semibold text-muted-foreground">Description</label>
@@ -285,12 +305,16 @@ export default function StandardsPage() {
 
   useEffect(() => { fetchStandards(); }, [fetchStandards]);
 
-  useEffect(() => {
-    api.get("/dynamic-fields").then(r => {
-      const names: string[] = r.data.data?.standard_names || [];
-      setCategories(names);
-    }).catch(() => {});
+  const fetchCategories = useCallback(async () => {
+    try {
+      const r = await api.get("/dynamic-fields");
+      setCategories(r.data.data?.standard_names || []);
+    } catch {}
   }, []);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
 
   const handleAddCategory = async () => {
     if (!newCategoryName.trim()) return toast.error("Category name is required");
@@ -311,11 +335,24 @@ export default function StandardsPage() {
     catch { toast.error("Delete failed"); }
   };
 
+  const handleDeleteTab = async (categoryName: string) => {
+    if (!confirm(`Warning: This will delete ALL standards for category "${categoryName}" from the database. This action cannot be undone.\n\nAre you sure you want to proceed?`)) return;
+    try {
+      await api.delete(`/standards/category/${encodeURIComponent(categoryName)}`);
+      await api.delete("/dynamic-fields/standard-names", { data: { names: [categoryName] } });
+      toast.success(`Deleted all records and option for ${categoryName}`);
+      fetchCategories();
+      fetchStandards();
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Failed to delete standards");
+    }
+  };
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     const result = standards.filter(s => {
       const matchSearch = !q || (s.standard_no || "").toLowerCase().includes(q) || (s.description || "").toLowerCase().includes(q);
-      const matchTab = !activeTab || s.category === activeTab;
+      const matchTab = !activeTab || activeTab === "ALL" || s.category === activeTab;
       return matchSearch && matchTab;
     });
 
@@ -332,7 +369,7 @@ export default function StandardsPage() {
     const ordered = categories.length > 0
       ? [...categories.filter(n => fromData.includes(n)), ...fromData.filter(n => !categories.includes(n))]
       : fromData;
-    return ordered;
+    return ["ALL", ...ordered];
   }, [standards, categories]);
 
   useEffect(() => {
@@ -375,10 +412,18 @@ export default function StandardsPage() {
             const color = TAB_COLORS[colorIdx];
             const isActive = activeTab === tab;
             return (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition-all -mb-px ${isActive ? color.active + " border border-b-0 shadow-sm" : "bg-background border-transparent text-muted-foreground hover:text-foreground border"}`}>
-                {tab} <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? color.badge : "bg-muted"}`}>{tabCount[tab] || 0}</span>
-              </button>
+              <div key={tab} className="relative group/tab flex">
+                <button onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition-all -mb-px flex items-center gap-1.5 ${isActive ? color.active + " border border-b-0 shadow-sm" : "bg-background border-transparent text-muted-foreground hover:text-foreground border"}`}>
+                  {tab === "ALL" ? "ALL Standards" : tab}
+                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? color.badge : "bg-muted"}`}>{tabCount[tab] || 0}</span>
+                  {isAdmin && tab !== "ALL" && (
+                    <span onClick={(e) => { e.stopPropagation(); handleDeleteTab(tab); }} className="w-3.5 h-3.5 rounded-full flex items-center justify-center bg-red-500/20 hover:bg-red-500 hover:text-white text-red-500 cursor-pointer ml-1 transition" title={`Delete all standards for ${tab}`}>
+                      <X className="w-2.5 h-2.5" />
+                    </span>
+                  )}
+                </button>
+              </div>
             );
           })}
         </div>
@@ -444,8 +489,8 @@ export default function StandardsPage() {
         )}
       </div>
 
-      <StandardModal open={addOpen} onClose={() => setAddOpen(false)} editStandard={null} onSaved={fetchStandards} categories={categories} />
-      <StandardModal open={!!editStandard} onClose={() => setEditStandard(null)} editStandard={editStandard} onSaved={fetchStandards} categories={categories} />
+      <StandardModal open={addOpen} onClose={() => setAddOpen(false)} editStandard={null} onSaved={fetchStandards} categories={categories} onRefreshOptions={fetchCategories} />
+      <StandardModal open={!!editStandard} onClose={() => setEditStandard(null)} editStandard={editStandard} onSaved={fetchStandards} categories={categories} onRefreshOptions={fetchCategories} />
       <NewVersionModal standard={newVerStandard} onClose={() => setNewVerStandard(null)} onSaved={fetchStandards} />
       <VersionsModal standardId={versionsId} onClose={() => setVersionsId(null)} />
       
