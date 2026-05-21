@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
 import { Plus, Pencil, Trash2, Upload, History, Search, Loader2, Download, File, Power, Video, X, Play } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 
 const SOP_VIDEO_TAB = "SOP Video";
 const API_BASE_URL = process.env.NEXT_PUBLIC_URL || "";
@@ -178,7 +179,7 @@ interface ControlPlan {
   id: number; name: string; line: string; rev_no: string | null;
   rev_date: string | null; file_path: string | null; is_active: number;
   language: string; version: number; parent_id: number | null;
-  is_latest: number; sequence_number: number; remarks: string | null; created_by: string; created_at: string;
+  is_latest: number; sequence_number: number; remarks: any; created_by: string; created_at: string;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_URL || "";
@@ -239,12 +240,14 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines, onRefreshOptions }
   const [language, setLanguage] = useState("English"); const [file, setFile] = useState<File | null>(null);
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState(0);
   const isEdit = !!editPlan;
 
   useEffect(() => {
-    if (editPlan) { name ? null : setName(editPlan.name); setLine(editPlan.line); setSequenceNo(editPlan.sequence_number || 0); setRevNo(editPlan.rev_no || ""); setRevDate(editPlan.rev_date || ""); setLanguage(editPlan.language); setRemarks((editPlan as any).remarks || ""); }
+    if (editPlan) { name ? null : setName(editPlan.name); setLine(editPlan.line); setSequenceNo(editPlan.sequence_number || 0); setRevNo(editPlan.rev_no || ""); setRevDate(editPlan.rev_date || ""); setLanguage(editPlan.language); setRemarks(Array.isArray((editPlan as any).remarks) ? (editPlan as any).remarks.join("\n") : ((editPlan as any).remarks || "")); }
     else { setName(""); setLine(lines[0] || ""); setSequenceNo(""); setRevNo(""); setRevDate(""); setLanguage("English"); setRemarks(""); }
     setFile(null);
+    setProgress(0);
   }, [editPlan, open, lines]);
 
   const handleDeleteLineOption = async () => {
@@ -263,20 +266,46 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines, onRefreshOptions }
   const handleSave = async () => {
     if (!name.trim()) return toast.error("Name is required");
     setSaving(true);
+    setProgress(0);
     try {
       if (isEdit) {
         await api.put(`/control-plans/${editPlan!.id}`, { name, line, rev_no: revNo, rev_date: revDate, language, sequence_number: Number(sequenceNo) || 0, remarks });
       } else {
-        const fd = new FormData();
-        fd.append("name", name.trim()); fd.append("line", line); fd.append("rev_no", revNo);
-        fd.append("rev_date", revDate); fd.append("language", language);
-        fd.append("sequence_number", (Number(sequenceNo) || 0).toString());
-        fd.append("remarks", remarks);
-        if (file) fd.append("file", file);
-        await api.post("/control-plans", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        if (!file) {
+          const fd = new FormData();
+          fd.append("name", name.trim()); fd.append("line", line); fd.append("rev_no", revNo);
+          fd.append("rev_date", revDate); fd.append("language", language);
+          fd.append("sequence_number", (Number(sequenceNo) || 0).toString());
+          fd.append("remarks", remarks);
+          await api.post("/control-plans", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        } else {
+          const chunkSize = 5 * 1024 * 1024;
+          const totalChunks = Math.ceil(file.size / chunkSize);
+          const uploadId = Date.now().toString() + Math.random().toString(36).substring(2);
+          for (let i = 0; i < totalChunks; i++) {
+            const start = i * chunkSize;
+            const end = Math.min(start + chunkSize, file.size);
+            const chunk = file.slice(start, end);
+            const fd = new FormData();
+            fd.append("uploadId", uploadId);
+            fd.append("chunkIndex", i.toString());
+            fd.append("totalChunks", totalChunks.toString());
+            fd.append("fileName", file.name);
+            fd.append("name", name.trim());
+            fd.append("line", line);
+            fd.append("rev_no", revNo);
+            fd.append("rev_date", revDate);
+            fd.append("language", language);
+            fd.append("sequence_number", (Number(sequenceNo) || 0).toString());
+            fd.append("remarks", remarks);
+            fd.append("chunk", chunk);
+            await api.post(`/control-plans/chunk?uploadId=${uploadId}&chunkIndex=${i}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+            setProgress(Math.round(((i + 1) / totalChunks) * 100));
+          }
+        }
       }
       toast.success(isEdit ? "Updated" : "Control plan added"); onSaved(); onClose();
-    } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); } finally { setSaving(false); }
+    } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); } finally { setSaving(false); setProgress(0); }
   };
 
   return (
@@ -309,11 +338,11 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines, onRefreshOptions }
               <option>English</option><option>Hindi</option>
             </select>
           </div>
-          <div><label className="text-xs font-semibold text-muted-foreground">Remarks</label><Input value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Enter remarks for this version..." className="mt-1" /></div>
+          {isEdit && <div><label className="text-xs font-semibold text-muted-foreground">Remarks</label><Textarea value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Enter remarks for this version (one per line)..." className="mt-1 text-xs" /></div>}
           {!isEdit && <div><label className="text-xs font-semibold text-muted-foreground">File (optional)</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}{isEdit ? "Save" : "Add"}</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? (progress > 0 && progress < 100 ? `${progress}%` : <Loader2 className="w-4 h-4 animate-spin mr-1" />) : null}{isEdit ? "Save" : "Add"}</Button>
           </div>
         </div>
       </DialogContent>
@@ -325,19 +354,35 @@ function NewVersionModal({ plan, onClose, onSaved }: { plan: ControlPlan | null;
   const [revNo, setRevNo] = useState(""); const [revDate, setRevDate] = useState(new Date().toISOString().slice(0, 10));
   const [remarks, setRemarks] = useState("");
   const [file, setFile] = useState<File | null>(null); const [saving, setSaving] = useState(false);
-  useEffect(() => { if (plan) { setRevNo(plan.rev_no || ""); setRemarks(""); } setFile(null); }, [plan]);
+  const [progress, setProgress] = useState(0);
+  useEffect(() => { if (plan) { setRevNo(plan.rev_no || ""); setRemarks(""); } setFile(null); setProgress(0); }, [plan]);
   const handleSave = async () => {
     if (!file) return toast.error("Please select a file");
+    if (!remarks.trim()) return toast.error("Remarks are required for new versions");
     setSaving(true);
+    setProgress(0);
     try {
-      const fd = new FormData();
-      fd.append("rev_no", revNo);
-      fd.append("rev_date", revDate);
-      fd.append("remarks", remarks);
-      fd.append("file", file);
-      await api.post(`/control-plans/${plan!.id}/new-version`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const chunkSize = 5 * 1024 * 1024;
+      const totalChunks = Math.ceil(file.size / chunkSize);
+      const uploadId = Date.now().toString() + Math.random().toString(36).substring(2);
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, file.size);
+        const chunk = file.slice(start, end);
+        const fd = new FormData();
+        fd.append("uploadId", uploadId);
+        fd.append("chunkIndex", i.toString());
+        fd.append("totalChunks", totalChunks.toString());
+        fd.append("fileName", file.name);
+        fd.append("rev_no", revNo);
+        fd.append("rev_date", revDate);
+        fd.append("remarks", remarks);
+        fd.append("chunk", chunk);
+        await api.post(`/control-plans/${plan!.id}/new-version/chunk?uploadId=${uploadId}&chunkIndex=${i}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        setProgress(Math.round(((i + 1) / totalChunks) * 100));
+      }
       toast.success("New version uploaded"); onSaved(); onClose();
-    } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); } finally { setSaving(false); }
+    } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); } finally { setSaving(false); setProgress(0); }
   };
   return (
     <Dialog open={!!plan} onOpenChange={o => !o && onClose()}>
@@ -348,9 +393,9 @@ function NewVersionModal({ plan, onClose, onSaved }: { plan: ControlPlan | null;
             <div><label className="text-xs font-semibold text-muted-foreground">Rev No</label><Input value={revNo} onChange={e => setRevNo(e.target.value)} className="mt-1" /></div>
             <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><Input type="date" value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
           </div>
-          <div><label className="text-xs font-semibold text-muted-foreground">Remarks <span className="text-amber-600">(required)</span></label><Input value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Describe changes in this new version..." className="mt-1 border-amber-300 focus:border-amber-500" /></div>
+          <div><label className="text-xs font-semibold text-muted-foreground">Remarks <span className="text-amber-600">(required)</span></label><Textarea value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Describe changes in this new version (one per line)..." className="mt-1 text-xs border-amber-300 focus:border-amber-500" /></div>
           <div><label className="text-xs font-semibold text-muted-foreground">File *</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>
-          <div className="flex justify-end gap-2 pt-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}Upload</Button></div>
+          <div className="flex justify-end gap-2 pt-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={handleSave} disabled={saving}>{saving ? (progress > 0 && progress < 100 ? `${progress}%` : <Loader2 className="w-4 h-4 animate-spin mr-1" />) : null}Upload</Button></div>
         </div>
       </DialogContent>
     </Dialog>
@@ -359,7 +404,24 @@ function NewVersionModal({ plan, onClose, onSaved }: { plan: ControlPlan | null;
 
 function VersionsModal({ planId, onClose }: { planId: number | null; onClose: () => void; }) {
   const [versions, setVersions] = useState<ControlPlan[]>([]); const [loading, setLoading] = useState(false);
+  const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
+  const [editingRemarkVal, setEditingRemarkVal] = useState("");
+  const [savingRemark, setSavingRemark] = useState(false);
+
   useEffect(() => { if (!planId) return; setLoading(true); api.get(`/control-plans/${planId}/versions`).then(r => setVersions(r.data.data || [])).catch(() => toast.error("Failed")).finally(() => setLoading(false)); }, [planId]);
+
+  const handleSaveRemark = async (id: number) => {
+    setSavingRemark(true);
+    try {
+      const response = await api.put(`/control-plans/${id}`, { remarks: editingRemarkVal });
+      const updated = response.data.data;
+      setVersions(prev => prev.map(v => v.id === id ? { ...v, remarks: updated.remarks } : v));
+      setEditingRemarkId(null);
+      toast.success("Remark updated");
+    } catch(e) { toast.error("Failed to update remark"); }
+    finally { setSavingRemark(false); }
+  }
+
   return (
     <Dialog open={!!planId} onOpenChange={o => !o && onClose()}>
       <DialogContent className="!max-w-xl max-h-[80vh] flex flex-col">
@@ -367,11 +429,42 @@ function VersionsModal({ planId, onClose }: { planId: number | null; onClose: ()
         {loading ? <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin" /></div> : (
           <div className="flex-1 overflow-y-auto space-y-2 mt-2">
             {versions.map(v => (
-              <div key={v.id} className={`flex items-center justify-between p-3 rounded-xl border ${v.is_latest ? "bg-emerald-50 border-emerald-200" : "bg-muted/30"}`}>
-                <div><p className="text-sm font-semibold">v{v.version} — Rev {v.rev_no || "#"}</p><p className="text-xs text-muted-foreground">{fmtDate(v.rev_date)} · Added {fmtDate(v.created_at)}</p></div>
-                <div className="flex gap-2 items-center">
-                  {v.is_latest && <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200">Latest</Badge>}
-                  <FileLink path={v.file_path} />
+              <div key={v.id} className={`flex flex-col p-3 rounded-xl border ${v.is_latest ? "bg-emerald-50 border-emerald-200" : "bg-muted/30"}`}>
+                <div className="flex items-center justify-between">
+                  <div><p className="text-sm font-semibold">v{v.version} — Rev {v.rev_no || "#"}</p><p className="text-xs text-muted-foreground">{fmtDate(v.rev_date)} · Added {fmtDate(v.created_at)}</p></div>
+                  <div className="flex gap-2 items-center">
+                    {v.is_latest && <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200">Latest</Badge>}
+                    <FileLink path={v.file_path} />
+                  </div>
+                </div>
+                <div className="mt-2 pt-2 border-t flex flex-col gap-1">
+                  <div className="flex items-start gap-2">
+                    <span className="text-xs font-semibold text-muted-foreground min-w-[60px]">Remarks:</span>
+                    {editingRemarkId === v.id ? (
+                      <div className="flex-1 flex gap-2 items-start">
+                        <Textarea value={editingRemarkVal} onChange={e => setEditingRemarkVal(e.target.value)} className="h-16 text-xs flex-1" placeholder="Enter remarks (one per line)..." />
+                        <div className="flex flex-col gap-1">
+                          <Button size="sm" className="h-7 px-2" onClick={() => handleSaveRemark(v.id)} disabled={savingRemark}>Save</Button>
+                          <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => setEditingRemarkId(null)}>Cancel</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex-1">
+                          {Array.isArray(v.remarks) && v.remarks.length > 0 ? (
+                            <ul className="list-disc pl-4 text-xs text-slate-700 space-y-0.5">
+                              {v.remarks.map((r: string, idx: number) => (
+                                <li key={idx}>{r}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <span className="text-xs text-slate-700">—</span>
+                          )}
+                        </div>
+                        <button onClick={() => { setEditingRemarkId(v.id); setEditingRemarkVal(Array.isArray(v.remarks) ? v.remarks.join("\n") : (v.remarks || "")); }} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit Remarks"><Pencil className="w-3.5 h-3.5" /></button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -383,8 +476,8 @@ function VersionsModal({ planId, onClose }: { planId: number | null; onClose: ()
 }
 
 function exportCSV(data: ControlPlan[], line: string) {
-  const headers = ["SR No.", "Plan Name", "Line", "Rev No.", "Rev Date", "Language", "Status", "Remarks", "Document", "Version"];
-  const rows = data.map((p, i) => [i + 1, p.name, p.line, p.rev_no || "", fmtDate(p.rev_date), p.language, p.is_active ? "Active" : "Inactive", p.remarks || "", p.file_path ? getFileUrl(p.file_path) : "", p.version]);
+  const headers = ["SR No.", "Plan Name", "Line", "Rev No.", "Rev Date", "Language", "Status", "Document", "Version"];
+  const rows = data.map((p, i) => [i + 1, p.name, p.line, p.rev_no || "", fmtDate(p.rev_date), p.language, p.is_active ? "Active" : "Inactive", p.file_path ? getFileUrl(p.file_path) : "", p.version]);
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob); const a = document.createElement("a");
@@ -546,11 +639,7 @@ export default function ControlPlanPage() {
                   {isSop && <Video className="w-3 h-3" />}
                   {tab}
                   {!isSop && <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? color.badge : "bg-muted"}`}>{tabCount[tab] || 0}</span>}
-                  {isAdmin && !isSop && (
-                    <span onClick={(e) => { e.stopPropagation(); handleDeleteTab(tab); }} className="w-3.5 h-3.5 rounded-full flex items-center justify-center bg-red-500/20 hover:bg-red-500 hover:text-white text-red-500 cursor-pointer ml-1 transition" title={`Delete all control plans for ${tab}`}>
-                      <X className="w-2.5 h-2.5" />
-                    </span>
-                  )}
+                
                 </button>
               </div>
             );
@@ -577,8 +666,8 @@ export default function ControlPlanPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Rev Date</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Language</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Remarks</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Document</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Remarks</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Ver.</th>
                     {isAdmin && <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Actions</th>}
                   </tr>
@@ -605,8 +694,10 @@ export default function ControlPlanPage() {
                           {p.is_active ? "Active" : "Inactive"}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground max-w-[150px] truncate">{p.remarks || "—"}</td>
                       <td className="px-4 py-3"><FileLink path={p.file_path} /></td>
+                      <td className="px-4 py-3 text-xs max-w-[180px] truncate text-muted-foreground">
+                        {Array.isArray(p.remarks) ? p.remarks.join(", ") : (p.remarks || "—")}
+                      </td>
                       <td className="px-4 py-3"><Badge variant="outline" className="text-[10px]">v{p.version}</Badge></td>
                       {isAdmin && (
                         <td className="px-4 py-3">

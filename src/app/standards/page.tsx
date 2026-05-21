@@ -10,10 +10,11 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
 import { Plus, Pencil, Trash2, Upload, History, Search, Loader2, Download, File as FileIcon, X } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 
 interface Standard {
   id: number; standard_no: string; description: string | null;
-  rev_number: string | null; rev_date: string | null; comment: string | null; remarks: string | null;
+  rev_number: string | null; rev_date: string | null; comment: string | null; remarks: any;
   file_path: string | null; category: string;
   version: number; is_latest: number; created_by: string; created_at: string;
 }
@@ -53,7 +54,7 @@ function StandardModal({ open, onClose, editStandard, onSaved, categories, onRef
   useEffect(() => {
     const defaultCat = categories[0] || "MANUAL";
     if (editStandard) {
-      setForm({ standard_no: editStandard.standard_no, description: editStandard.description || "", rev_number: editStandard.rev_number || "", rev_date: editStandard.rev_date || "", comment: editStandard.comment || "", category: editStandard.category, remarks: editStandard.remarks || "" });
+      setForm({ standard_no: editStandard.standard_no, description: editStandard.description || "", rev_number: editStandard.rev_number || "", rev_date: editStandard.rev_date || "", comment: editStandard.comment || "", category: editStandard.category, remarks: Array.isArray(editStandard.remarks) ? editStandard.remarks.join("\n") : (editStandard.remarks || "") });
     } else {
       setForm({ standard_no: "", description: "", rev_number: "", rev_date: "", comment: "", category: defaultCat, remarks: "" });
     }
@@ -158,10 +159,12 @@ function StandardModal({ open, onClose, editStandard, onSaved, categories, onRef
             <label className="text-xs font-semibold text-muted-foreground">Comment</label>
             <Input value={form.comment} onChange={e => setForm(f => ({ ...f, comment: e.target.value }))} className="mt-1" />
           </div>
-          <div className="col-span-2">
-            <label className="text-xs font-semibold text-muted-foreground">Remarks</label>
-            <Input value={form.remarks} onChange={e => setForm(f => ({ ...f, remarks: e.target.value }))} className="mt-1" />
-          </div>
+          {isEdit && (
+            <div className="col-span-2">
+              <label className="text-xs font-semibold text-muted-foreground">Remarks</label>
+              <Textarea value={form.remarks} onChange={e => setForm(f => ({ ...f, remarks: e.target.value }))} className="mt-1 text-xs" placeholder="Enter remarks (one per line)..." />
+            </div>
+          )}
           {!isEdit && (
             <div className="col-span-2">
               <label className="text-xs font-semibold text-muted-foreground">File (optional)</label>
@@ -186,6 +189,7 @@ function NewVersionModal({ standard, onClose, onSaved }: { standard: Standard | 
   useEffect(() => { if (standard) { setRevNo(standard.rev_number || ""); setComment(standard.comment || ""); setRemarks(""); } setFile(null); }, [standard]);
   const handleSave = async () => {
     if (!file) return toast.error("Please select a file");
+    if (!remarks.trim()) return toast.error("Remarks are required for new versions");
     setSaving(true);
     setProgress(0);
     try {
@@ -239,7 +243,7 @@ function NewVersionModal({ standard, onClose, onSaved }: { standard: Standard | 
             <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><Input type="date" value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
           </div>
           <div><label className="text-xs font-semibold text-muted-foreground">Comment</label><Input value={comment} onChange={e => setComment(e.target.value)} className="mt-1" /></div>
-          <div><label className="text-xs font-semibold text-muted-foreground">Remarks</label><Input value={remarks} onChange={e => setRemarks(e.target.value)} className="mt-1" /></div>
+          <div><label className="text-xs font-semibold text-muted-foreground">Remarks <span className="text-amber-600">(required)</span></label><Textarea value={remarks} onChange={e => setRemarks(e.target.value)} className="mt-1 text-xs" placeholder="Describe changes in this new version (one per line)..." /></div>
           <div><label className="text-xs font-semibold text-muted-foreground">File *</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" />{saving && progress > 0 && <div className="h-1 bg-muted mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} /></div>}</div>
           <div className="flex justify-end gap-2 pt-1"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={handleSave} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}{saving && progress > 0 ? `${progress}%` : "Upload"}</Button></div>
         </div>
@@ -250,7 +254,24 @@ function NewVersionModal({ standard, onClose, onSaved }: { standard: Standard | 
 
 function VersionsModal({ standardId, onClose }: { standardId: number | null; onClose: () => void; }) {
   const [versions, setVersions] = useState<Standard[]>([]); const [loading, setLoading] = useState(false);
+  const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
+  const [editingRemarkVal, setEditingRemarkVal] = useState("");
+  const [savingRemark, setSavingRemark] = useState(false);
+
   useEffect(() => { if (!standardId) return; setLoading(true); api.get(`/standards/${standardId}/versions`).then(r => setVersions(r.data.data || [])).catch(() => toast.error("Failed")).finally(() => setLoading(false)); }, [standardId]);
+
+  const handleSaveRemark = async (id: number) => {
+    setSavingRemark(true);
+    try {
+      const response = await api.put(`/standards/${id}`, { remarks: editingRemarkVal });
+      const updated = response.data.data;
+      setVersions(prev => prev.map(v => v.id === id ? { ...v, remarks: updated.remarks } : v));
+      setEditingRemarkId(null);
+      toast.success("Remark updated");
+    } catch(e) { toast.error("Failed to update remark"); }
+    finally { setSavingRemark(false); }
+  }
+
   return (
     <Dialog open={!!standardId} onOpenChange={o => !o && onClose()}>
       <DialogContent className="!max-w-xl max-h-[80vh] flex flex-col">
@@ -258,11 +279,42 @@ function VersionsModal({ standardId, onClose }: { standardId: number | null; onC
         {loading ? <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin" /></div> : (
           <div className="flex-1 overflow-y-auto space-y-2 mt-2">
             {versions.map(v => (
-              <div key={v.id} className={`flex items-center justify-between p-3 rounded-xl border ${v.is_latest ? "bg-emerald-50 border-emerald-200" : "bg-muted/30"}`}>
-                <div><p className="text-sm font-semibold">v{v.version} — Rev: {v.rev_number || "#"}</p><p className="text-xs text-muted-foreground">{fmtDate(v.rev_date)} · Added {fmtDate(v.created_at)}</p></div>
-                <div className="flex gap-2 items-center">
-                  {v.is_latest && <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200">Latest</Badge>}
-                  <FileLink path={v.file_path} />
+              <div key={v.id} className={`flex flex-col p-3 rounded-xl border ${v.is_latest ? "bg-emerald-50 border-emerald-200" : "bg-muted/30"}`}>
+                <div className="flex items-center justify-between">
+                  <div><p className="text-sm font-semibold">v{v.version} — Rev: {v.rev_number || "#"}</p><p className="text-xs text-muted-foreground">{fmtDate(v.rev_date)} · Added {fmtDate(v.created_at)}</p></div>
+                  <div className="flex gap-2 items-center">
+                    {v.is_latest && <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200">Latest</Badge>}
+                    <FileLink path={v.file_path} />
+                  </div>
+                </div>
+                <div className="mt-2 pt-2 border-t flex flex-col gap-1">
+                  <div className="flex items-start gap-2">
+                    <span className="text-xs font-semibold text-muted-foreground min-w-[60px]">Remarks:</span>
+                    {editingRemarkId === v.id ? (
+                      <div className="flex-1 flex gap-2 items-start">
+                        <Textarea value={editingRemarkVal} onChange={e => setEditingRemarkVal(e.target.value)} className="h-16 text-xs flex-1" placeholder="Enter remarks (one per line)..." />
+                        <div className="flex flex-col gap-1">
+                          <Button size="sm" className="h-7 px-2" onClick={() => handleSaveRemark(v.id)} disabled={savingRemark}>Save</Button>
+                          <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => setEditingRemarkId(null)}>Cancel</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex-1">
+                          {Array.isArray(v.remarks) && v.remarks.length > 0 ? (
+                            <ul className="list-disc pl-4 text-xs text-slate-700 space-y-0.5">
+                              {v.remarks.map((r: string, idx: number) => (
+                                <li key={idx}>{r}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <span className="text-xs text-slate-700">—</span>
+                          )}
+                        </div>
+                        <button onClick={() => { setEditingRemarkId(v.id); setEditingRemarkVal(Array.isArray(v.remarks) ? v.remarks.join("\n") : (v.remarks || "")); }} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit Remarks"><Pencil className="w-3.5 h-3.5" /></button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -274,8 +326,8 @@ function VersionsModal({ standardId, onClose }: { standardId: number | null; onC
 }
 
 function exportCSV(data: Standard[], category: string) {
-  const headers = ["SR No.", "Standard No.", "Description", "Category", "Rev Number", "Rev Date", "Comment", "Remarks", "Document", "Version"];
-  const rows = data.map((s, i) => [i + 1, s.standard_no, s.description || "", s.category, s.rev_number || "", fmtDate(s.rev_date), s.comment || "", s.remarks || "", s.file_path ? getFileUrl(s.file_path) : "", s.version]);
+  const headers = ["SR No.", "Standard No.", "Description", "Category", "Rev Number", "Rev Date", "Comment", "Document", "Version"];
+  const rows = data.map((s, i) => [i + 1, s.standard_no, s.description || "", s.category, s.rev_number || "", fmtDate(s.rev_date), s.comment || "", s.file_path ? getFileUrl(s.file_path) : "", s.version]);
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob); const a = document.createElement("a");
@@ -417,11 +469,7 @@ export default function StandardsPage() {
                   className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition-all -mb-px flex items-center gap-1.5 ${isActive ? color.active + " border border-b-0 shadow-sm" : "bg-background border-transparent text-muted-foreground hover:text-foreground border"}`}>
                   {tab === "ALL" ? "ALL Standards" : tab}
                   <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? color.badge : "bg-muted"}`}>{tabCount[tab] || 0}</span>
-                  {isAdmin && tab !== "ALL" && (
-                    <span onClick={(e) => { e.stopPropagation(); handleDeleteTab(tab); }} className="w-3.5 h-3.5 rounded-full flex items-center justify-center bg-red-500/20 hover:bg-red-500 hover:text-white text-red-500 cursor-pointer ml-1 transition" title={`Delete all standards for ${tab}`}>
-                      <X className="w-2.5 h-2.5" />
-                    </span>
-                  )}
+                 
                 </button>
               </div>
             );
@@ -464,7 +512,9 @@ export default function StandardsPage() {
                       <td className="px-4 py-3 text-xs font-semibold">{s.rev_number || "—"}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{fmtDate(s.rev_date)}</td>
                       <td className="px-4 py-3 text-xs max-w-[160px] truncate text-muted-foreground">{s.comment || "—"}</td>
-                      <td className="px-4 py-3 text-xs max-w-[160px] truncate text-muted-foreground">{s.remarks || "—"}</td>
+                      <td className="px-4 py-3 text-xs max-w-[180px] truncate text-muted-foreground">
+                        {Array.isArray(s.remarks) ? s.remarks.join(", ") : (s.remarks || "—")}
+                      </td>
                       <td className="px-4 py-3"><FileLink path={s.file_path} /></td>
                       <td className="px-4 py-3"><Badge variant="outline" className="text-[10px]">v{s.version}</Badge></td>
                       {isAdmin && (

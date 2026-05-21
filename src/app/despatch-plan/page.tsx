@@ -10,7 +10,7 @@ import { useUser } from "@/contexts/UserContext";
 import { useScannedProducts } from "@/contexts/ScannedProductsContext";
 import {
   Plus, Save, Loader2, Trash2, AlertTriangle, CheckCircle2,
-  Truck, Download, Upload, FileSpreadsheet, X, BarChart2,
+  Truck, Download, Upload, FileSpreadsheet, X, BarChart2, Pencil
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
@@ -154,15 +154,29 @@ function VehicleCard({ vehicle, idx, canEdit, customerOptions, onChange, onRemov
               placeholder="Part Number"
               className={`h-6 text-xs ${p.invalid ? "border-red-500 bg-red-50" : ""}`}
             />
-            <div className="flex items-center gap-1.5">
-              <Input
-                type="number" min="0"
-                value={p.target_qty || ""}
-                onChange={e => updatePallet(pi, "target_qty", parseInt(e.target.value) || 0)}
-                placeholder="Qty"
-                className="h-6 text-xs w-20"
-              />
-
+            <div className="flex items-center gap-1 w-full">
+              <div className="flex-1">
+                <span className="text-[9px] text-slate-400 font-semibold block">Target</span>
+                <Input
+                  type="number" min="0"
+                  value={p.target_qty || ""}
+                  onChange={e => updatePallet(pi, "target_qty", parseInt(e.target.value) || 0)}
+                  placeholder="Qty"
+                  className="h-7 text-xs w-full px-1"
+                />
+              </div>
+              {vehicle.id && (
+                <div className="flex-1">
+                  <span className="text-[9px] text-slate-400 font-semibold block">Filled</span>
+                  <Input
+                    type="number" min="0"
+                    value={p.filled_quantity || 0}
+                    onChange={e => updatePallet(pi, "filled_quantity", parseInt(e.target.value) || 0)}
+                    placeholder="Filled"
+                    className="h-7 text-xs w-full px-1 font-bold text-green-700"
+                  />
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -183,16 +197,17 @@ function VehicleCard({ vehicle, idx, canEdit, customerOptions, onChange, onRemov
 }
 
 // ── Read-only Table View ──────────────────────────────────────────────────────
-function PlanTable({ vehicles, onPriorityChange }: {
+function PlanTable({ vehicles, onPriorityChange, onEditVehicle }: {
   vehicles: Vehicle[];
   onPriorityChange?: (vehicleId: number, priority: number | null) => void;
+  onEditVehicle?: (vehicle: Vehicle) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border shadow-sm">
       <table className="w-full text-sm text-left">
         <thead>
           <tr className="bg-slate-800 text-white">
-            {["Vehicle", "Customer", "Priority", "Pallet", "Part Number", "Tube Length", "Target Qty", "Filled Qty", "Fulfilled"].map(h => (
+            {["Vehicle", "Customer", "Priority", "Pallet", "Part Number", "Tube Length", "Target Qty", "Filled Qty", "Fulfilled", "Action"].map(h => (
               <th key={h} className="px-4 py-4 font-bold text-sm uppercase tracking-wider whitespace-nowrap">{h}</th>
             ))}
           </tr>
@@ -213,6 +228,11 @@ function PlanTable({ vehicles, onPriorityChange }: {
                     <span className={`px-3 py-1 rounded-full text-sm font-bold border ${customerColor(v.customer)}`}>{v.customer || "—"}</span>
                   </td>
                   <td colSpan={7} className="px-4 py-3 text-center text-slate-400 italic font-bold">No pallets</td>
+                  <td className="px-4 py-3 text-center border-r">
+                    {onEditVehicle && (
+                      <button onClick={() => onEditVehicle(v)} className="p-1.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100"><Pencil className="w-4 h-4" /></button>
+                    )}
+                  </td>
                 </tr>
               );
             }
@@ -267,6 +287,13 @@ function PlanTable({ vehicles, onPriorityChange }: {
                       ? <span className="px-3 py-1 text-xs font-black rounded-full bg-green-500 text-white shadow-sm">✓ YES</span>
                       : <span className="px-3 py-1 text-xs font-black rounded-full bg-yellow-400 text-yellow-900 shadow-sm">PENDING</span>}
                   </td>
+                  {pi === 0 ? (
+                    <td className="px-4 py-3 text-center border-r" rowSpan={v.pallets.length}>
+                      {onEditVehicle && (
+                        <button onClick={() => onEditVehicle(v)} className="p-1.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100"><Pencil className="w-4 h-4" /></button>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
               );
             });
@@ -277,15 +304,63 @@ function PlanTable({ vehicles, onPriorityChange }: {
   );
 }
 
-function IncompleteBanner({ vehicles }: { vehicles: any[] }) {
+function IncompleteBanner({ vehicles, onSaved, customerOptions, canEdit }: { vehicles: any[], onSaved: () => void, customerOptions: string[], canEdit: boolean }) {
+  const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!editingVehicle) return;
+    setSaving(true);
+    try {
+      await api.put(`/despatch-plan/vehicles/${editingVehicle.id}`, editingVehicle);
+      toast.success("Vehicle updated");
+      setEditingVehicle(null);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!vehicles.length) return null;
   return (
-    <div className="border border-yellow-300 bg-yellow-50 rounded-xl overflow-hidden shadow-sm">
+    <div className="border border-yellow-300 bg-yellow-50 rounded-xl overflow-hidden shadow-sm relative">
       <div className="flex items-center gap-2 p-4 bg-yellow-100 border-b border-yellow-200">
         <AlertTriangle className="w-5 h-5 text-yellow-600" />
         <span className="font-bold text-yellow-800 text-sm">Pending Despatches (Previous Day)</span>
       </div>
-      <PlanTable vehicles={vehicles} />
+      <PlanTable vehicles={vehicles} onEditVehicle={canEdit ? setEditingVehicle : undefined} />
+      
+      {editingVehicle && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-bold text-lg">Edit Pending Vehicle</h3>
+              <button onClick={() => setEditingVehicle(null)} className="p-1 hover:bg-slate-100 rounded">
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              <VehicleCard
+                idx={0}
+                vehicle={editingVehicle}
+                canEdit={true}
+                customerOptions={customerOptions}
+                onChange={setEditingVehicle}
+                onRemove={() => {}}
+              />
+            </div>
+            <div className="p-4 border-t flex justify-end gap-2 bg-slate-50 rounded-b-xl">
+              <Button variant="outline" onClick={() => setEditingVehicle(null)}>Cancel</Button>
+              <Button onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -757,7 +832,7 @@ export default function DespatchPlanPage() {
             </div>
 
             {/* Previous day incomplete */}
-            <IncompleteBanner vehicles={incompleteFromPrev} />
+            <IncompleteBanner vehicles={incompleteFromPrev} onSaved={() => loadPlan(planDate)} customerOptions={customerList} canEdit={canEdit} />
 
             {loading ? (
               <div className="flex items-center justify-center py-24 gap-2 text-muted-foreground">

@@ -79,11 +79,11 @@ export default function BearingCupPlanPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── helpers ─────────────────────────────────────────────────────────────────
-  const makeEmptyRow = (jt: string, type: "G" | "NG"): PlanRow => {
-    const r: PlanRow = { jt_type: jt, type, shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0 };
-    for (let i = 3; i < numShifts; i++) r[`shift${i + 1}_qty`] = 0;
-    return r;
-  };
+const makeEmptyRow = (jt: string, type: "G" | "NG"): PlanRow => {
+  const r: PlanRow = { jt_type: jt, type, shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0 };
+  for (let i = 3; i < numShifts; i++) r[`shift${i + 1}_qty`] = 0;
+  return r;
+};
 
   const calcTotal = (row: PlanRow, shifts: number) => {
     let t = 0;
@@ -158,13 +158,13 @@ export default function BearingCupPlanPage() {
     });
   };
 
-  const addJtRow = () => {
-    setRows((prev) => [
-      ...prev,
-      makeEmptyRow(jtOptions[0] || "NEW", "G"),
-      makeEmptyRow(jtOptions[0] || "NEW", "NG"),
-    ]);
-  };
+const addJtRow = () => {
+  setRows((prev) => [
+    ...prev,
+    makeEmptyRow("SELECT", "G"),
+    makeEmptyRow("SELECT", "NG"),
+  ]);
+};
 
   const removeJtPair = (jtType: string) => {
     setRows((prev) => prev.filter((r) => r.jt_type !== jtType));
@@ -203,6 +203,11 @@ export default function BearingCupPlanPage() {
 
   // ── save ─────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
+
+      if (rows.some(r => r.jt_type === "SELECT")) {
+    toast.error("Please select a JT type for all rows before saving.");
+    return;
+  }
     setSaving(true);
     try {
       await api.put("/bearing-cup-plans", { date, rows });
@@ -548,15 +553,16 @@ export default function BearingCupPlanPage() {
                           <tr key={`${jt}-G`} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-3 py-2 text-left border-r border-b">
                               {canEdit && isFormEditable ? (
-                                <select
-                                  value={gRow.jt_type}
-                                  onChange={(e) => changeJtType(jt, e.target.value)}
-                                  className="w-full text-xs border rounded px-2 py-1 bg-background font-medium text-slate-800"
-                                >
-                                  {jtOptions.map((opt) => (
-                                    <option key={opt}>{opt}</option>
-                                  ))}
-                                </select>
+<select
+  value={gRow.jt_type}
+  onChange={(e) => changeJtType(jt, e.target.value)}
+  className={`w-full text-xs border rounded px-2 py-1 bg-background font-medium ${gRow.jt_type === "SELECT" ? "text-muted-foreground border-amber-400 bg-amber-50" : "text-slate-800"}`}
+>
+  <option value="SELECT">— Select JT —</option>
+  {jtOptions.map((opt) => (
+    <option key={opt}>{opt}</option>
+  ))}
+</select>
                               ) : (
                                 <span className="font-medium text-slate-800">{jt} {gRow.is_synthetic && <span className="text-[10px] text-muted-foreground ml-1">(Carry)</span>}</span>
                               )}
