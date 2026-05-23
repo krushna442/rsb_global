@@ -523,7 +523,7 @@ const focusScanInput = useCallback(() => {
                             </tbody>
                         </table>
                     </div>
-
+                    {<p>Total : {filteredRecords.length}</p>}
                     {filteredRecords.length > PAGE_SIZE && (
                         <div className="flex items-center justify-between mt-4">
                             <p className="text-xs text-muted-foreground">

@@ -7,11 +7,12 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
-import { Loader2, Calendar as CalendarIcon, Save, Plus, Minus, Download } from "lucide-react";
+import { Loader2, Calendar as CalendarIcon, Save, Plus, Minus, Download, FileSpreadsheet } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
+import * as XLSX from "xlsx";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface RecordRow {
@@ -25,6 +26,11 @@ interface RecordRow {
   isNew?: boolean;
 }
 
+interface TubeLengthRow {
+  tube_length: string;
+  qty: number;
+}
+
 const PART_TYPES = ["front", "rear", "ia"] as const;
 const HOURS = Array.from({ length: 24 }, (_, i) => i + 6);
 
@@ -34,6 +40,9 @@ const formatHour = (h: number) => {
   if (hour === 0) hour = 12;
   return `${hour}:00 ${ampm}`;
 };
+
+const fmtDate = (d: string) =>
+  new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
 const partConfig = [
   { key: "front" as const, label: "Front", color: "text-orange-700", bg: "bg-orange-50", headerBg: "bg-orange-100", chartColor: "#ea580c" },
@@ -47,10 +56,61 @@ const subCols = [
   { key: "remarks",     label: "Remarks",     width: "min-w-[160px]" },
 ];
 
+// ── Excel export helper for tube-length table ─────────────────────────────────
+function exportTubeLengthExcel(
+  from: string,
+  to: string,
+  byDate: Record<string, TubeLengthRow[]>,
+  totals: TubeLengthRow[]
+) {
+  const wb = XLSX.utils.book_new();
+  const isSingleDay = from === to;
+
+  if (isSingleDay) {
+    // Single sheet with that day's data
+    const rows = byDate[from] || [];
+    const sheetData: any[][] = [["Tube Length", "Quantity"]];
+    rows.forEach(r => sheetData.push([r.tube_length, r.qty]));
+    sheetData.push(["", ""]); // blank row
+    sheetData.push(["TOTAL", rows.reduce((s, r) => s + r.qty, 0)]);
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+    ws["!cols"] = [{ wch: 22 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws, from);
+  } else {
+    // One sheet per day
+    const sortedDates = Object.keys(byDate).sort();
+    sortedDates.forEach(d => {
+      const rows = byDate[d] || [];
+      const sheetData: any[][] = [["Tube Length", "Quantity"]];
+      rows.forEach(r => sheetData.push([r.tube_length, r.qty]));
+      sheetData.push(["", ""]);
+      sheetData.push(["TOTAL", rows.reduce((s, r) => s + r.qty, 0)]);
+      const ws = XLSX.utils.aoa_to_sheet(sheetData);
+      ws["!cols"] = [{ wch: 22 }, { wch: 12 }];
+      // Sheet name max 31 chars; use date as sheet name
+      XLSX.utils.book_append_sheet(wb, ws, d.slice(5)); // "MM-DD" to keep short
+    });
+
+    // Total sheet
+    const totalData: any[][] = [["Tube Length", "Total Quantity"]];
+    totals.forEach(r => totalData.push([r.tube_length, r.qty]));
+    totalData.push(["", ""]);
+    totalData.push(["GRAND TOTAL", totals.reduce((s, r) => s + r.qty, 0)]);
+    const wsTotal = XLSX.utils.aoa_to_sheet(totalData);
+    wsTotal["!cols"] = [{ wch: 22 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsTotal, "Total");
+  }
+
+  XLSX.writeFile(wb, `tube_length_summary_${from}_to_${to}.xlsx`);
+  toast.success("Excel exported successfully");
+}
+
 export default function HourlyProductionPage() {
   const { user } = useUser();
-  const canEdit = ["admin", "super admin", "production"].includes(user?.role || "");
+  // All roles can enter values; viewers have time-based slot restrictions
+  const canEdit = true;
   const isAdmin  = ["admin", "super admin"].includes(user?.role || "");
+  const isViewer = user?.role === "viewer";
 
   // ── active tab ───────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"daily" | "cumulative">("daily");
@@ -61,13 +121,20 @@ export default function HourlyProductionPage() {
   const [saving, setSaving] = useState(false);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [deletedIds, setDeletedIds] = useState<number[]>([]);
-  const isViewer = user?.role === "viewer";
 
   // ── cumulative state ─────────────────────────────────────────────────────────
   const [summaryMonth, setSummaryMonth] = useState(new Date().toISOString().slice(0, 7));
   const [summaryData, setSummaryData] = useState<any[]>([]);
   const [summaryCum, setSummaryCum] = useState({ front: 0, rear: 0, ia: 0 });
   const [loadingSummary, setLoadingSummary] = useState(false);
+
+  // ── tube-length summary state ─────────────────────────────────────────────────
+  const today = new Date().toISOString().slice(0, 10);
+  const [tlFrom, setTlFrom] = useState(today);
+  const [tlTo, setTlTo] = useState(today);
+  const [tlLoading, setTlLoading] = useState(false);
+  const [tlByDate, setTlByDate] = useState<Record<string, TubeLengthRow[]>>({});
+  const [tlTotals, setTlTotals] = useState<TubeLengthRow[]>([]);
 
   // ── loaders ──────────────────────────────────────────────────────────────────
   const loadDaily = useCallback(async (d: string) => {
@@ -95,6 +162,23 @@ export default function HourlyProductionPage() {
   }, []);
 
   useEffect(() => { loadSummary(summaryMonth); }, [summaryMonth, loadSummary]);
+
+  const loadTubeLengthSummary = useCallback(async (from: string, to: string) => {
+    setTlLoading(true);
+    try {
+      const res = await api.get(`/hourly-production/tube-length-summary?from=${from}&to=${to}`);
+      setTlByDate(res.data.byDate || {});
+      setTlTotals(res.data.totals || []);
+    } catch { toast.error("Failed to load tube length summary"); }
+    finally { setTlLoading(false); }
+  }, []);
+
+  // Load tube-length summary for today when cumulative tab is opened
+  useEffect(() => {
+    if (activeTab === "cumulative") {
+      loadTubeLengthSummary(tlFrom, tlTo);
+    }
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── daily helpers ─────────────────────────────────────────────────────────────
   const getRecords = useCallback(
@@ -192,16 +276,34 @@ export default function HourlyProductionPage() {
     [summaryData]
   );
 
-  const filteredHours = useMemo(() => {
-    if (!isViewer) return HOURS;
+  // Always show all 24 slots (6 AM to next 6 AM)
+  const filteredHours = HOURS;
+
+  // For viewer: compute which slots are editable (current slot + last 2 before it)
+  const viewerEditableSlots = useMemo(() => {
     const now = new Date();
     let h = now.getHours();
-    if (h < 6) h += 24; // map 0-5 AM to 24-29
-    
-    // User requested slots FROM 2 slots before.
-    // Example: if current time is 11:50 (h=11), show 9, 10, and 11 slots.
-    return HOURS.filter(slot => slot >= h - 2 && slot <= h);
-  }, [isViewer]);
+    if (h < 6) h += 24;
+    const editableSet = new Set<number>();
+    for (let offset = 0; offset <= 2; offset++) {
+      const slot = h - offset;
+      if (slot >= 6) editableSet.add(slot);
+    }
+    return editableSet;
+  }, []);
+
+  const isSlotEditable = (hour: number): boolean => {
+    if (!isViewer) return true;
+    return viewerEditableSlots.has(hour);
+  };
+
+  // ── Tube length summary: display rows ─────────────────────────────────────────
+  // For single-day: show that day's rows. For range: show totals only (with day breakdown on export)
+  const isSingleDay = tlFrom === tlTo;
+  const displayRows: TubeLengthRow[] = isSingleDay
+    ? (tlByDate[tlFrom] || [])
+    : tlTotals;
+  const displayTotal = displayRows.reduce((s, r) => s + r.qty, 0);
 
   // ── tab styles ────────────────────────────────────────────────────────────────
   const tabCls = (t: "daily" | "cumulative") =>
@@ -227,12 +329,10 @@ export default function HourlyProductionPage() {
                   <CalendarIcon className="w-4 h-4 text-muted-foreground" />
                   <input type="date" className="text-sm border-none bg-transparent outline-none cursor-pointer" value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
-                {canEdit && (
-                  <Button onClick={handleSave} disabled={loading || saving} className="gap-1.5">
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    Save Board
-                  </Button>
-                )}
+                <Button onClick={handleSave} disabled={loading || saving} className="gap-1.5">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Save Board
+                </Button>
               </>
             )}
           </div>
@@ -278,12 +378,17 @@ export default function HourlyProductionPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredHours.map((hour, rowIdx) => {
+                      const slotEditable = isSlotEditable(hour);
                       const rowBg = rowIdx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
+                      const lockedStyle = !slotEditable ? "opacity-60 bg-slate-100/80" : "";
                       return (
-                        <tr key={hour} className={`${rowBg} hover:bg-slate-100/70 transition-colors`}>
+                        <tr key={hour} className={`${rowBg} ${lockedStyle} hover:bg-slate-100/70 transition-colors`}>
                           <td className="px-4 py-2 border border-slate-200 font-medium text-slate-600 whitespace-nowrap align-middle">
                             <span className="font-semibold">{formatHour(hour)}</span>
                             <span className="text-muted-foreground text-xs block">–{formatHour(hour + 1)}</span>
+                            {isViewer && !slotEditable && (
+                              <span className="text-[10px] text-slate-400 block mt-0.5">🔒 locked</span>
+                            )}
                           </td>
                           {partConfig.map((pt) => {
                             const recs = getRecords(hour, pt.key);
@@ -291,19 +396,19 @@ export default function HourlyProductionPage() {
                               <React.Fragment key={pt.key}>
                                 <td className={`px-2 py-1.5 border border-slate-200 ${pt.bg}/30`}>
                                   {recs.map((rec, idx) => (
-                                    <Input key={idx} value={rec.tube_length} onChange={(e) => handleUpdate(hour, pt.key, idx, "tube_length", e.target.value)} disabled={!canEdit} className="h-8 text-xs w-full mb-1 last:mb-0" placeholder="—" />
+                                    <Input key={idx} value={rec.tube_length} onChange={(e) => handleUpdate(hour, pt.key, idx, "tube_length", e.target.value)} disabled={!slotEditable} className="h-8 text-xs w-full mb-1 last:mb-0" placeholder="—" />
                                   ))}
                                 </td>
                                 <td className={`px-2 py-1.5 border border-slate-200 ${pt.bg}/30`}>
                                   {recs.map((rec, idx) => (
-                                    <Input key={idx} type="number" min="0" value={rec.quantity || ""} onChange={(e) => handleUpdate(hour, pt.key, idx, "quantity", parseInt(e.target.value) || 0)} disabled={!canEdit} className="h-8 text-xs w-full mb-1 last:mb-0" placeholder="0" />
+                                    <Input key={idx} type="number" min="0" value={rec.quantity || ""} onChange={(e) => handleUpdate(hour, pt.key, idx, "quantity", parseInt(e.target.value) || 0)} disabled={!slotEditable} className="h-8 text-xs w-full mb-1 last:mb-0" placeholder="0" />
                                   ))}
                                 </td>
                                 <td className={`px-2 py-1.5 border border-slate-200 ${pt.bg}/30`}>
                                   {recs.map((rec, idx) => (
                                     <div key={idx} className="flex gap-1 items-center mb-1 last:mb-0">
-                                      <Input value={rec.remarks} onChange={(e) => handleUpdate(hour, pt.key, idx, "remarks", e.target.value)} disabled={!canEdit} className="h-8 text-xs w-full" placeholder="—" />
-                                      {canEdit && (
+                                      <Input value={rec.remarks} onChange={(e) => handleUpdate(hour, pt.key, idx, "remarks", e.target.value)} disabled={!slotEditable} className="h-8 text-xs w-full" placeholder="—" />
+                                      {slotEditable && (
                                         <div className="flex items-center">
                                           <Button size="icon" variant="ghost" className="h-6 w-6 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => handleRemoveRow(hour, pt.key, idx)}>
                                             <Minus className="w-4 h-4" />
@@ -415,7 +520,7 @@ export default function HourlyProductionPage() {
                   </ResponsiveContainer>
                 </div>
 
-                {/* Table */}
+                {/* Monthly Date Summary Table */}
                 <div className="border rounded-xl bg-white overflow-hidden shadow-sm">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-100">
@@ -451,6 +556,104 @@ export default function HourlyProductionPage() {
                 </div>
               </>
             )}
+
+            {/* ── Tube Length Count Table ── */}
+            <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
+              {/* Header bar */}
+              <div className="px-5 py-3.5 bg-gradient-to-r from-indigo-700 to-indigo-500 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-white text-sm">Tube Length Production Count</h3>
+                  <p className="text-indigo-200 text-xs mt-0.5">Aggregated quantity per tube length across shifts</p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 bg-white/15 rounded-md px-2 py-1">
+                    <span className="text-indigo-100 text-xs font-medium">From</span>
+                    <input
+                      type="date"
+                      value={tlFrom}
+                      onChange={e => setTlFrom(e.target.value)}
+                      className="text-xs bg-transparent text-white border-none outline-none cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-white/15 rounded-md px-2 py-1">
+                    <span className="text-indigo-100 text-xs font-medium">To</span>
+                    <input
+                      type="date"
+                      value={tlTo}
+                      onChange={e => setTlTo(e.target.value)}
+                      className="text-xs bg-transparent text-white border-none outline-none cursor-pointer"
+                    />
+                  </div>
+                  <button
+                    onClick={() => loadTubeLengthSummary(tlFrom, tlTo)}
+                    disabled={tlLoading}
+                    className="flex items-center gap-1.5 bg-white text-indigo-700 text-xs font-semibold px-3 py-1.5 rounded-md hover:bg-indigo-50 transition-colors disabled:opacity-60"
+                  >
+                    {tlLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CalendarIcon className="w-3 h-3" />}
+                    Load
+                  </button>
+                  <button
+                    onClick={() => exportTubeLengthExcel(tlFrom, tlTo, tlByDate, tlTotals)}
+                    disabled={displayRows.length === 0}
+                    className="flex items-center gap-1.5 bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-md hover:bg-emerald-600 transition-colors disabled:opacity-50"
+                  >
+                    <FileSpreadsheet className="w-3 h-3" /> Export Excel
+                  </button>
+                </div>
+              </div>
+
+              {tlLoading ? (
+                <div className="flex justify-center items-center py-12 text-muted-foreground gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin" /> Loading tube length data...
+                </div>
+              ) : displayRows.length === 0 ? (
+                <div className="text-center py-12 text-sm text-muted-foreground">
+                  No tube length data found for the selected range.
+                </div>
+              ) : (
+                <>
+                  {/* If range: show label */}
+                  {!isSingleDay && (
+                    <div className="px-5 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700 font-medium">
+                      Showing combined totals for <strong>{fmtDate(tlFrom)}</strong> → <strong>{fmtDate(tlTo)}</strong>. Excel export includes per-day sheets.
+                    </div>
+                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 border-b">
+                        <tr>
+                          <th className="px-5 py-3 text-left text-xs font-semibold text-slate-600 w-16">#</th>
+                          <th className="px-5 py-3 text-left text-xs font-semibold text-slate-600">Tube Length</th>
+                          <th className="px-5 py-3 text-right text-xs font-semibold text-indigo-700">
+                            {isSingleDay ? fmtDate(tlFrom) : "Total Quantity"}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {displayRows.map((row, i) => (
+                          <tr key={row.tube_length} className={i % 2 === 0 ? "bg-white" : "bg-slate-50/50"}>
+                            <td className="px-5 py-2.5 text-xs text-muted-foreground">{i + 1}</td>
+                            <td className="px-5 py-2.5 text-sm font-medium text-slate-800">{row.tube_length}</td>
+                            <td className="px-5 py-2.5 text-right">
+                              <span className="inline-block min-w-[56px] text-right text-sm font-bold text-indigo-700 bg-indigo-50 rounded-md px-2 py-0.5">
+                                {row.qty.toLocaleString()}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-slate-800 text-white">
+                        <tr>
+                          <td className="px-5 py-3 text-xs" />
+                          <td className="px-5 py-3 text-xs font-bold uppercase tracking-wide">Grand Total</td>
+                          <td className="px-5 py-3 text-right font-bold text-lg">{displayTotal.toLocaleString()}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -612,8 +612,8 @@ const addJtRow = () => {
                             )}
                           </tr>
                         )}
-                        {/* Row NG */}
-                        {ngRow && (
+                        {/* Row NG — hidden in view mode when target=0 and total_qty=0 */}
+                        {ngRow && (isFormEditable || ngRow.target !== 0 || ngRow.total_qty !== 0) && (
                           <tr key={`${jt}-NG`} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-3 py-2 text-left border-r border-b">
                               <span className="font-medium text-slate-400">{jt}</span>
@@ -655,6 +655,7 @@ const addJtRow = () => {
                             )}
                           </tr>
                         )}
+
                       </>
                     );
                   })}
@@ -721,10 +722,19 @@ const addJtRow = () => {
 function GraphsTab() {
   const today = new Date().toISOString().slice(0, 10);
   const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+
+  // ── Bar-chart section ─────────────────────────────────────────────────────
   const [from, setFrom] = useState(startOfMonth);
   const [to, setTo] = useState(today);
   const [loading, setLoading] = useState(false);
   const [summaryData, setSummaryData] = useState<any[]>([]);
+
+  // ── JT Count table section ───────────────────────────────────────────────
+  const [jtFrom, setJtFrom] = useState(today);
+  const [jtTo, setJtTo] = useState(today);
+  const [jtLoading, setJtLoading] = useState(false);
+  const [jtTotals, setJtTotals] = useState<{ jt_type: string; G: number; NG: number; total: number }[]>([]);
+  const [jtByDate, setJtByDate] = useState<Record<string, Record<string, { G: number; NG: number }>>>({});
 
   const loadGraph = async () => {
     setLoading(true);
@@ -735,7 +745,17 @@ function GraphsTab() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { loadGraph(); }, []);
+  const loadJtSummary = async (f: string, t: string) => {
+    setJtLoading(true);
+    try {
+      const res = await api.get(`/bearing-cup-plans/jt-summary?from=${f}&to=${t}`);
+      setJtTotals(res.data.totals || []);
+      setJtByDate(res.data.byDate || {});
+    } catch { toast.error("Failed to load JT count data"); }
+    finally { setJtLoading(false); }
+  };
+
+  useEffect(() => { loadGraph(); loadJtSummary(today, today); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const jtStats = useMemo(() => {
     const map: Record<string, { jt_type: string; target: number; actual: number }> = {};
@@ -743,16 +763,61 @@ function GraphsTab() {
       if (!map[row.jt_type]) {
         map[row.jt_type] = { jt_type: row.jt_type, target: 0, actual: 0 };
       }
-      map[row.jt_type].target += Number(row.total_qty) || 0; // total_qty is the plan target
-      map[row.jt_type].actual += Number(row.target) || 0;    // target is the actual production
+      map[row.jt_type].target += Number(row.total_qty) || 0;
+      map[row.jt_type].actual += Number(row.target) || 0;
     });
     return Object.values(map).sort((a, b) => b.actual - a.actual);
   }, [summaryData]);
 
   const maxActual = Math.max(1, ...jtStats.map(s => s.actual));
 
+  // ── Excel export for JT count ─────────────────────────────────────────────
+  const exportJtExcel = () => {
+    if (!jtTotals.length) return toast.error("No data to export");
+    const wb = XLSX.utils.book_new();
+    const isSingle = jtFrom === jtTo;
+
+    if (isSingle) {
+      const rows: any[][] = [["JT Type", "G", "NG", "Total"]];
+      jtTotals.forEach(r => rows.push([r.jt_type, r.G, r.NG, r.total]));
+      rows.push(["", "", "", ""]);
+      rows.push(["TOTAL", jtTotals.reduce((s,r)=>s+r.G,0), jtTotals.reduce((s,r)=>s+r.NG,0), jtTotals.reduce((s,r)=>s+r.total,0)]);
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+      XLSX.utils.book_append_sheet(wb, ws, jtFrom);
+    } else {
+      // Per-day sheets
+      const sortedDates = Object.keys(jtByDate).sort();
+      sortedDates.forEach(d => {
+        const dayData = jtByDate[d];
+        const rows: any[][] = [["JT Type", "G", "NG", "Total"]];
+        Object.entries(dayData).sort().forEach(([jt, v]) => {
+          rows.push([jt, v.G || 0, v.NG || 0, (v.G || 0) + (v.NG || 0)]);
+        });
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws["!cols"] = [{ wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+        XLSX.utils.book_append_sheet(wb, ws, d.slice(5)); // MM-DD
+      });
+      // Total sheet
+      const totalRows: any[][] = [["JT Type", "G", "NG", "Total"]];
+      jtTotals.forEach(r => totalRows.push([r.jt_type, r.G, r.NG, r.total]));
+      totalRows.push(["", "", "", ""]);
+      totalRows.push(["GRAND TOTAL", jtTotals.reduce((s,r)=>s+r.G,0), jtTotals.reduce((s,r)=>s+r.NG,0), jtTotals.reduce((s,r)=>s+r.total,0)]);
+      const wsTot = XLSX.utils.aoa_to_sheet(totalRows);
+      wsTot["!cols"] = [{ wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+      XLSX.utils.book_append_sheet(wb, wsTot, "Total");
+    }
+
+    XLSX.writeFile(wb, `jt_count_${jtFrom}_to_${jtTo}.xlsx`);
+    toast.success("Excel exported");
+  };
+
+  const jtGrandTotal = { G: jtTotals.reduce((s,r)=>s+r.G,0), NG: jtTotals.reduce((s,r)=>s+r.NG,0), total: jtTotals.reduce((s,r)=>s+r.total,0) };
+  const isSingleDay = jtFrom === jtTo;
+
   return (
     <div className="space-y-6">
+      {/* ── Date range for bar chart ── */}
       <div className="flex flex-wrap items-end gap-3 bg-white border rounded-xl p-4 shadow-sm">
         <div>
           <label className="text-xs font-semibold text-muted-foreground block mb-1">From Date</label>
@@ -768,6 +833,7 @@ function GraphsTab() {
         </Button>
       </div>
 
+      {/* ── Bar chart ── */}
       <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
         <div className="px-5 py-3.5 bg-gradient-to-r from-slate-800 to-slate-700">
           <h3 className="font-bold text-white text-sm">Series Wise Production</h3>
@@ -794,6 +860,126 @@ function GraphsTab() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── JT Type Count Table ── */}
+      <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
+        {/* Header */}
+        <div className="px-5 py-3.5 bg-gradient-to-r from-violet-700 to-violet-500 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-white text-sm">JT Type Production Count</h3>
+            <p className="text-violet-200 text-xs mt-0.5">G, NG and Total quantities per JT type</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-white/15 rounded-md px-2 py-1">
+              <span className="text-violet-100 text-xs font-medium">From</span>
+              <input
+                type="date" value={jtFrom}
+                onChange={e => setJtFrom(e.target.value)}
+                className="text-xs bg-transparent text-white border-none outline-none cursor-pointer"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 bg-white/15 rounded-md px-2 py-1">
+              <span className="text-violet-100 text-xs font-medium">To</span>
+              <input
+                type="date" value={jtTo}
+                onChange={e => setJtTo(e.target.value)}
+                className="text-xs bg-transparent text-white border-none outline-none cursor-pointer"
+              />
+            </div>
+            <button
+              onClick={() => loadJtSummary(jtFrom, jtTo)}
+              disabled={jtLoading}
+              className="flex items-center gap-1.5 bg-white text-violet-700 text-xs font-semibold px-3 py-1.5 rounded-md hover:bg-violet-50 transition-colors disabled:opacity-60"
+            >
+              {jtLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <BarChart2 className="w-3 h-3" />}
+              Load
+            </button>
+            <button
+              onClick={exportJtExcel}
+              disabled={jtTotals.length === 0}
+              className="flex items-center gap-1.5 bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-md hover:bg-emerald-600 transition-colors disabled:opacity-50"
+            >
+              <FileSpreadsheet className="w-3 h-3" /> Export Excel
+            </button>
+          </div>
+        </div>
+
+        {jtLoading ? (
+          <div className="flex justify-center items-center py-12 text-muted-foreground gap-2">
+            <Loader2 className="w-5 h-5 animate-spin" /> Loading JT count data...
+          </div>
+        ) : jtTotals.length === 0 ? (
+          <div className="text-center py-12 text-sm text-muted-foreground">
+            No JT data found for the selected range.
+          </div>
+        ) : (
+          <>
+            {!isSingleDay && (
+              <div className="px-5 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700 font-medium">
+                Showing combined totals for <strong>{jtFrom}</strong> → <strong>{jtTo}</strong>. Excel export includes per-day sheets.
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-center">
+                <thead className="bg-slate-50 border-b">
+                  <tr>
+                    <th className="px-5 py-3 text-left text-xs font-semibold text-slate-600 w-10">#</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold text-slate-700">JT Type</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-emerald-700">G</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-rose-600">NG</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-violet-700">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {jtTotals.map((row, i) => {
+                    const maxTotal = Math.max(1, ...jtTotals.map(r => r.total));
+                    const gPct = row.total > 0 ? Math.round((row.G / row.total) * 100) : 0;
+                    return (
+                      <tr key={row.jt_type} className={i % 2 === 0 ? "bg-white" : "bg-slate-50/50"}>
+                        <td className="px-5 py-3 text-xs text-muted-foreground text-left">{i + 1}</td>
+                        <td className="px-5 py-3 text-left">
+                          <span className="font-semibold text-slate-800 text-sm">{row.jt_type}</span>
+                          {/* Mini G/NG bar */}
+                          <div className="mt-1 h-1.5 rounded-full bg-slate-100 overflow-hidden w-36">
+                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${gPct}%` }} />
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">{gPct}% Good</span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="inline-block min-w-[48px] text-right font-bold text-emerald-700 bg-emerald-50 rounded px-2 py-0.5 text-sm">
+                            {row.G.toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className={`inline-block min-w-[48px] text-right font-bold rounded px-2 py-0.5 text-sm ${
+                            row.NG > 0 ? "text-rose-700 bg-rose-50" : "text-slate-400 bg-slate-50"
+                          }`}>
+                            {row.NG.toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="inline-block min-w-[56px] text-right font-bold text-violet-700 bg-violet-50 rounded px-2 py-0.5 text-sm">
+                            {row.total.toLocaleString()}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-slate-800 text-white font-bold">
+                  <tr>
+                    <td className="px-5 py-3" />
+                    <td className="px-5 py-3 text-left text-xs uppercase tracking-wide">Grand Total</td>
+                    <td className="px-4 py-3 text-right text-emerald-300">{jtGrandTotal.G.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-rose-300">{jtGrandTotal.NG.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-violet-200 text-lg">{jtGrandTotal.total.toLocaleString()}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
