@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState,useEffect, ReactNode, useCal
 import api from "@/lib/api";
 import { Product, ApiResponse, ProductCounts, DropdownOptions } from "@/types/api";
 import { toast } from "sonner";
+import { useSocket } from "@/hooks/useSocket";
 
 interface FetchProductsOptions {
   status?: string;
@@ -345,6 +346,12 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     fetchProducts();
     fetchDropdownOptions();
   }, [fetchProducts, fetchDropdownOptions]);
+
+  // ── Real-time sync: refresh products when any client mutates product data ──
+  const handleProductsChange = useCallback(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+  useSocket("products:changed", handleProductsChange);
 
   return (
     <ProductsContext.Provider

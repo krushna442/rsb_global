@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
+import { useSocket } from "@/hooks/useSocket";
 import { useScannedProducts } from "@/contexts/ScannedProductsContext";
 import {
   Plus, Save, Loader2, Trash2, AlertTriangle, CheckCircle2,
@@ -590,10 +591,22 @@ export default function DespatchPlanPage() {
     loadPlan(planDate);
   }, [planDate, loadPlan]);
 
-  // Auto-refresh plan every 30s in read-only mode to pick up filled_quantity updates from scans
+  // ── Real-time sync via Socket.IO ──────────────────────────────────────────
+  // Refresh plan when another client modifies despatch data.
+  // Skip if the user is currently in Edit mode to avoid disrupting their work.
+  const handleDespatchChange = useCallback(() => {
+    if (!isEditing) {
+      loadPlan(planDate);
+    }
+  }, [planDate, isEditing, loadPlan]);
+
+  useSocket("despatch-plan:changed", handleDespatchChange);
+
+  // Fallback: also poll every 90s for scan-qty updates from barcode terminals
+  // that may not be connected to this socket (e.g., handheld scanners)
   useEffect(() => {
     if (!planExists || isEditing) return;
-    const interval = setInterval(() => loadPlan(planDate), 30000);
+    const interval = setInterval(() => loadPlan(planDate), 90000);
     return () => clearInterval(interval);
   }, [planExists, isEditing, planDate, loadPlan]);
 

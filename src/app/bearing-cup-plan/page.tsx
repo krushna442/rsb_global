@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
+import { useSocket } from "@/hooks/useSocket";
 import {
   Loader2, Calendar as CalendarIcon, Save, Plus, X, Download, Upload, FileSpreadsheet, BarChart2
 } from "lucide-react";
@@ -132,6 +133,17 @@ const makeEmptyRow = (jt: string, type: "G" | "NG"): PlanRow => {
       }
     }).catch(console.error);
   }, []);
+
+  // ── Real-time sync ─────────────────────────────────────────────────────
+  // Refresh the plan when another client saves data for the same date,
+  // but skip if user is in Edit mode to avoid disrupting their work.
+  const handleBearingCupChange = useCallback((payload: { date?: string }) => {
+    if (isEditing) return;
+    if (!payload?.date || payload.date === date) {
+      loadPlan(date);
+    }
+  }, [date, isEditing, loadPlan]);
+  useSocket("bearing-cup:changed", handleBearingCupChange);
 
   useEffect(() => { loadPlan(date); }, [date, loadPlan]);
 

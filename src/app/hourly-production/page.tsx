@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
+import { useSocket } from "@/hooks/useSocket";
 import { Loader2, Calendar as CalendarIcon, Save, Plus, Minus, Download, FileSpreadsheet } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -291,6 +292,17 @@ export default function HourlyProductionPage() {
     }
     return editableSet;
   }, []);
+
+  // ── Real-time sync: refresh when another client changes data ─────────────────
+  // Only reloads if the event's date matches our currently viewed date.
+  const handleHourlyChange = useCallback((payload: { date?: string }) => {
+    if (!payload?.date || payload.date === date) {
+      loadDaily(date);
+    }
+    // If it's a different date's change, skip the reload to avoid unnecessary API calls
+  }, [date, loadDaily]);
+
+  useSocket("hourly-production:changed", handleHourlyChange);
 
   const isSlotEditable = (hour: number): boolean => {
     if (!isViewer) return true;

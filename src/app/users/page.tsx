@@ -50,6 +50,14 @@ import {
 
 import { useUser,MAIL_TYPES, MailType } from "@/contexts/UserContext";
 import { useDynamicFields } from "@/contexts/DynamicFieldsContext";
+import { useSocket } from "@/hooks/useSocket";
+import { useState, useCallback } from "react";
+import api from "@/lib/api";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
+import { User } from "@/types/api";
+
+// Initial state for the creation modal
 const roleBadge: Record<string, string> = {
     "super admin": "bg-violet-50 text-violet-700 border-violet-200",
     "admin": "bg-blue-50 text-blue-700 border-blue-200",
@@ -58,13 +66,6 @@ const roleBadge: Record<string, string> = {
     "viewer": "bg-gray-50 text-gray-600 border-gray-200",
 };
 
-import { useState } from "react";
-import api from "@/lib/api";
-import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
-import { User } from "@/types/api";
-
-// Initial state for the creation modal
 const INITIAL_FORM_STATE = {
     name: "",
     mobile: "",
@@ -95,6 +96,11 @@ const allNavs = [
 export default function UsersPage() {
     const { allUsers, fetchAllUsers, updateProfile, deactivateUser, deleteUser , addMailTypes, removeMailTypes} = useUser();
     const {data} = useDynamicFields();
+
+    // ── Real-time sync: refresh user list when any user changes on the server ──
+    const handleUsersChange = useCallback(() => { fetchAllUsers(); }, [fetchAllUsers]);
+    useSocket("users:changed", handleUsersChange);
+
     const [open, setOpen] = useState(false);
     const [viewOpen, setViewOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);

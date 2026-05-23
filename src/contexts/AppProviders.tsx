@@ -1,6 +1,6 @@
 "use client";
 
-import React, { ReactNode } from "react";
+import React, { ReactNode, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { UserProvider, useUser } from "@/contexts/UserContext";
 import { DynamicFieldsProvider } from "@/contexts/DynamicFieldsContext";
@@ -9,8 +9,29 @@ import { ScannedProductsProvider } from "@/contexts/ScannedProductsContext";
 import { DashboardProvider } from "@/contexts/DashboardContext";
 import { GlobalLoader } from "@/components/ui/GlobalLoader";
 import { Loader2 } from "lucide-react";
+import { connectSocket, disconnectSocket } from "@/lib/socket";
 
 const PUBLIC_ROUTES = ["/login", "/register"];
+
+/**
+ * Manages the Socket.IO connection lifecycle tied to the user's auth state.
+ * - Connects once when the user is authenticated.
+ * - Disconnects (and destroys the singleton) on logout.
+ * - This keeps a single persistent WebSocket open for the entire app session.
+ */
+function SocketLifecycle() {
+  const { isAuthenticated } = useUser();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      connectSocket();
+    } else {
+      disconnectSocket();
+    }
+  }, [isAuthenticated]);
+
+  return null; // purely side-effect component
+}
 
 function InnerProviders({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -58,6 +79,8 @@ function InnerProviders({ children }: { children: ReactNode }) {
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <UserProvider>
+      {/* SocketLifecycle lives inside UserProvider to access useUser() */}
+      <SocketLifecycle />
       <InnerProviders>{children}</InnerProviders>
     </UserProvider>
   );
