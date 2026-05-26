@@ -317,6 +317,22 @@ export default function HourlyProductionPage() {
     : tlTotals;
   const displayTotal = displayRows.reduce((s, r) => s + r.qty, 0);
 
+  const fmtShortDate = (d: string) =>
+    new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+
+  const dateRangeKeys = useMemo(() => {
+    if (isSingleDay) return [];
+    return Object.keys(tlByDate).sort();
+  }, [tlByDate, isSingleDay]);
+
+  const dateColTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    dateRangeKeys.forEach(date => {
+      totals[date] = (tlByDate[date] || []).reduce((s, r) => s + r.qty, 0);
+    });
+    return totals;
+  }, [dateRangeKeys, tlByDate]);
+
   // ── tab styles ────────────────────────────────────────────────────────────────
   const tabCls = (t: "daily" | "cumulative") =>
     `px-5 py-2 text-sm font-semibold rounded-t-lg transition-all border-b-2 ${
@@ -570,7 +586,7 @@ export default function HourlyProductionPage() {
             )}
 
             {/* ── Tube Length Count Table ── */}
-            <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
+            <div className={`border rounded-xl bg-white shadow-sm overflow-hidden  ${isSingleDay ? "max-w-xl" : "max-w-4xl"}`}>
               {/* Header bar */}
               <div className="px-5 py-3.5 bg-gradient-to-r from-indigo-700 to-indigo-500 flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -584,7 +600,7 @@ export default function HourlyProductionPage() {
                       type="date"
                       value={tlFrom}
                       onChange={e => setTlFrom(e.target.value)}
-                      className="text-xs bg-transparent text-white border-none outline-none cursor-pointer"
+                      className="text-xs bg-transparent text-white border-none outline-none cursor-pointer w-24"
                     />
                   </div>
                   <div className="flex items-center gap-1.5 bg-white/15 rounded-md px-2 py-1">
@@ -593,7 +609,7 @@ export default function HourlyProductionPage() {
                       type="date"
                       value={tlTo}
                       onChange={e => setTlTo(e.target.value)}
-                      className="text-xs bg-transparent text-white border-none outline-none cursor-pointer"
+                      className="text-xs bg-transparent text-white border-none outline-none cursor-pointer w-24"
                     />
                   </div>
                   <button
@@ -636,7 +652,15 @@ export default function HourlyProductionPage() {
                         <tr>
                           <th className="px-5 py-3 text-left text-xs font-semibold text-slate-600 w-16">#</th>
                           <th className="px-5 py-3 text-left text-xs font-semibold text-slate-600">Tube Length</th>
-                          <th className="px-5 py-3 text-right text-xs font-semibold text-indigo-700">
+                          
+                          {/* If range, render a column for each date */}
+                          {!isSingleDay && dateRangeKeys.map(date => (
+                            <th key={date} className="px-5 py-3 text-right text-xs font-semibold text-slate-600 whitespace-nowrap">
+                              {fmtShortDate(date)}
+                            </th>
+                          ))}
+
+                          <th className="px-5 py-3 text-right text-xs font-semibold text-indigo-700 whitespace-nowrap">
                             {isSingleDay ? fmtDate(tlFrom) : "Total Quantity"}
                           </th>
                         </tr>
@@ -646,6 +670,17 @@ export default function HourlyProductionPage() {
                           <tr key={row.tube_length} className={i % 2 === 0 ? "bg-white" : "bg-slate-50/50"}>
                             <td className="px-5 py-2.5 text-xs text-muted-foreground">{i + 1}</td>
                             <td className="px-5 py-2.5 text-sm font-medium text-slate-800">{row.tube_length}</td>
+                            
+                            {/* If range, render cell for each date */}
+                            {!isSingleDay && dateRangeKeys.map(date => {
+                              const dayQty = tlByDate[date]?.find(item => item.tube_length === row.tube_length)?.qty ?? 0;
+                              return (
+                                <td key={date} className="px-5 py-2.5 text-right text-sm text-slate-600">
+                                  {dayQty > 0 ? dayQty.toLocaleString() : "-"}
+                                </td>
+                              );
+                            })}
+
                             <td className="px-5 py-2.5 text-right">
                               <span className="inline-block min-w-[56px] text-right text-sm font-bold text-indigo-700 bg-indigo-50 rounded-md px-2 py-0.5">
                                 {row.qty.toLocaleString()}
@@ -654,11 +689,21 @@ export default function HourlyProductionPage() {
                           </tr>
                         ))}
                       </tbody>
-                      <tfoot className="bg-slate-800 text-white">
+                      <tfoot className="bg-slate-800 text-white font-semibold">
                         <tr>
                           <td className="px-5 py-3 text-xs" />
                           <td className="px-5 py-3 text-xs font-bold uppercase tracking-wide">Grand Total</td>
-                          <td className="px-5 py-3 text-right font-bold text-lg">{displayTotal.toLocaleString()}</td>
+                          
+                          {/* If range, render totals for each date column */}
+                          {!isSingleDay && dateRangeKeys.map(date => (
+                            <td key={date} className="px-5 py-3 text-right text-sm font-bold">
+                              {dateColTotals[date].toLocaleString()}
+                            </td>
+                          ))}
+
+                          <td className="px-5 py-3 text-right text-sm font-bold text-lg">
+                            {displayTotal.toLocaleString()}
+                          </td>
                         </tr>
                       </tfoot>
                     </table>
