@@ -10,6 +10,7 @@ import { DashboardProvider } from "@/contexts/DashboardContext";
 import { GlobalLoader } from "@/components/ui/GlobalLoader";
 import { Loader2 } from "lucide-react";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
+import { SessionTimeoutProvider } from "@/contexts/SessionTimeoutContext";
 
 const PUBLIC_ROUTES = ["/login", "/register"];
 
@@ -81,7 +82,9 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <UserProvider>
       {/* SocketLifecycle lives inside UserProvider to access useUser() */}
       <SocketLifecycle />
-      <InnerProviders>{children}</InnerProviders>
+      <SessionTimeoutProvider>
+        <InnerProviders>{children}</InnerProviders>
+      </SessionTimeoutProvider>
     </UserProvider>
   );
 }
