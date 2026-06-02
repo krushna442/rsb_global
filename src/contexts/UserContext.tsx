@@ -12,6 +12,7 @@ export const MAIL_TYPES = [
   'day_scan_report',
   'monthly_scan_report',
   'monthly_product_report',
+  'bearing_cup_mail',
 ] as const;
 
 export type MailType = typeof MAIL_TYPES[number];

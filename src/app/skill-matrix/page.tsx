@@ -58,7 +58,7 @@ function PersonDetailDialog({ person, machine, onClose, canEdit, onEdit, onDelet
               {url ? <img src={url} alt={person.name} className="w-full h-full object-cover" /> : <User className="w-10 h-10 text-slate-400" />}
             </div>
           </div>
-          <button onClick={onClose} className="absolute top-3 right-3 p-1.5 rounded-full bg-white/70 hover:bg-white text-slate-500"><X className="w-4 h-4" /></button>
+          {/* <button onClick={onClose} className="absolute top-3 right-3 p-1.5 rounded-full bg-white/70 hover:bg-white text-slate-500"><X className="w-4 h-4" /></button> */}
         </div>
         <div className="pt-12 px-6 pb-6 space-y-4">
           <div>

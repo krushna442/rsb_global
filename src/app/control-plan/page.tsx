@@ -481,7 +481,8 @@ function exportCSV(data: ControlPlan[], line: string) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob); const a = document.createElement("a");
-  a.href = url; a.download = `control_plan_${line.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+  const fileName = line === "ALL" ? `control_plan_ALL_${new Date().toISOString().slice(0, 10)}.csv` : `control_plan_${line.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.href = url; a.download = fileName; a.click(); URL.revokeObjectURL(url);
 }
 
 export default function ControlPlanPage() {
@@ -560,13 +561,20 @@ export default function ControlPlanPage() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return plans.filter(p => {
-      if (!showInactive && !p.is_active) return false;
-      if (langFilter !== "ALL" && p.language !== langFilter) return false;
-      const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.rev_no || "").toLowerCase().includes(q);
-      const matchTab = !activeTab || p.line === activeTab;
-      return matchSearch && matchTab;
-    });
+    return plans
+      .filter(p => {
+        if (!showInactive && !p.is_active) return false;
+        if (langFilter !== "ALL" && p.language !== langFilter) return false;
+        const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.rev_no || "").toLowerCase().includes(q);
+        const matchTab = !activeTab || activeTab === "ALL" || p.line === activeTab;
+        return matchSearch && matchTab;
+      })
+      .sort((a, b) => {
+        if (activeTab === "ALL") {
+          if (a.line !== b.line) return a.line.localeCompare(b.line);
+        }
+        return (a.sequence_number || 0) - (b.sequence_number || 0);
+      });
   }, [plans, search, activeTab, showInactive, langFilter]);
 
   const tabs = useMemo(() => {
@@ -574,7 +582,7 @@ export default function ControlPlanPage() {
     const ordered = lines.length > 0
       ? [...lines.filter(n => fromData.includes(n)), ...fromData.filter(n => !lines.includes(n))]
       : fromData;
-    return [...ordered, SOP_VIDEO_TAB];
+    return ["ALL", ...ordered, SOP_VIDEO_TAB];
   }, [plans, lines]);
 
   useEffect(() => {
@@ -603,7 +611,7 @@ export default function ControlPlanPage() {
             {(
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="Search plans..." className="pl-9 h-9 w-56 text-sm" value={search} onChange={e => setSearch(e.target.value)} />
+                <Input placeholder="Search by name, rev no..." className="pl-9 h-9 w-56 text-sm" value={search} onChange={e => setSearch(e.target.value)} />
               </div>
             )}
 
@@ -629,8 +637,13 @@ export default function ControlPlanPage() {
         <div className="flex gap-1.5 flex-wrap border-b">
           {tabs.map((tab, idx) => {
             const isSop = tab === SOP_VIDEO_TAB;
-            const colorIdx = idx === 0 ? 0 : (idx - 1) % TAB_COLORS.length;
-            const color = isSop ? { active: "bg-rose-600 text-white", badge: "bg-white/30" } : TAB_COLORS[colorIdx];
+            const isAll = tab === "ALL";
+            const colorIdx = isAll ? -1 : (isSop ? -1 : (idx - 1) % TAB_COLORS.length);
+            const color = isSop
+              ? { active: "bg-rose-600 text-white", badge: "bg-white/30" }
+              : isAll
+              ? { active: "bg-slate-700 text-white", badge: "bg-white/30" }
+              : TAB_COLORS[colorIdx < 0 ? 0 : colorIdx];
             const isActive = activeTab === tab;
             return (
               <div key={tab} className="relative group/tab flex">

@@ -1145,6 +1145,7 @@ export default function PDIPartReportPage() {
   // ── Manual PDI State ────────────────────────────────────────────────────────
   const [manualReports, setManualReports] = useState<any[]>([]);
   const [uploadingManual, setUploadingManual] = useState(false);
+  const [manualPartNumber, setManualPartNumber] = useState("");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const fetchManualReports = useCallback(async () => {
@@ -1172,6 +1173,9 @@ export default function PDIPartReportPage() {
     const formData = new FormData();
     formData.append("name", user?.name || user?.username || "Manual Upload");
     formData.append("file", file);
+    if (manualPartNumber.trim()) {
+      formData.append("part_number", manualPartNumber.trim());
+    }
 
     try {
       const res = await api.post("/pdi-manual", formData, {
@@ -1179,6 +1183,7 @@ export default function PDIPartReportPage() {
       });
       if (res.data.success) {
         toast.success("Document uploaded successfully");
+        setManualPartNumber("");
         if (isAdmin) fetchManualReports();
       } else {
         toast.error("Upload failed");

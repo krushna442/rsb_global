@@ -1019,28 +1019,32 @@ export default function DocumentsPage() {
         editProductId ? products.find(p => p.id === editProductId) || null : null
     , [editProductId, products]);
 
-    const handleDownloadZip = useCallback(async (product: Product) => {
+    const handleDownloadZip = useCallback(async (product: Product, type: "all" | "individual" | "ppap" = "all") => {
         const docs = parseCategorizedDocs(product.ppap_documents);
         const allDocs: { name: string; url: string }[] = [];
 
-        Object.entries(docs.individual).forEach(([key, val]) => {
-            if (val && val !== NOT_REQUIRED_VALUE) {
-                allDocs.push({ name: `individual_${key}`, url: getFileUrl(val) });
-            }
-        });
-        Object.entries(docs.ppap).forEach(([key, val]) => {
-            if (val && val !== NOT_REQUIRED_VALUE) {
-                allDocs.push({ name: `ppap_${key}`, url: getFileUrl(val) });
-            }
-        });
+        if (type === "all" || type === "individual") {
+            Object.entries(docs.individual).forEach(([key, val]) => {
+                if (val && val !== NOT_REQUIRED_VALUE) {
+                    allDocs.push({ name: `individual_${key}`, url: getFileUrl(val) });
+                }
+            });
+        }
+        if (type === "all" || type === "ppap") {
+            Object.entries(docs.ppap).forEach(([key, val]) => {
+                if (val && val !== NOT_REQUIRED_VALUE) {
+                    allDocs.push({ name: `ppap_${key}`, url: getFileUrl(val) });
+                }
+            });
+        }
 
         if (allDocs.length === 0) {
-            toast.warning("No documents available to download.");
+            toast.warning(`No ${type === "all" ? "" : type + " "}documents available to download.`);
             return;
         }
 
         const confirmed = window.confirm(
-            `Download all ${allDocs.length} document(s) for part "${product.part_number}" as a ZIP file?`
+            `Download ${type === "all" ? "all" : type} ${allDocs.length} document(s) for part "${product.part_number}" as a ZIP file?`
         );
         if (!confirmed) return;
 
@@ -1061,7 +1065,8 @@ export default function DocumentsPage() {
                 })
             );
             const content = await zip.generateAsync({ type: "blob" });
-            saveAs(content, `${product.part_number}_documents.zip`);
+            const suffix = type === "all" ? "documents" : `${type}_documents`;
+            saveAs(content, `${product.part_number}_${suffix}.zip`);
             toast.success(`ZIP downloaded for ${product.part_number}`);
         } catch (err) {
             toast.error("Failed to create ZIP file.");
@@ -1618,9 +1623,9 @@ export default function DocumentsPage() {
                                         {/* Edit column header */}
                                         <TableHead
                                             rowSpan={2}
-                                            className="text-xs font-bold uppercase tracking-wider text-muted-foreground h-10 sticky left-[160px] z-20 bg-muted/20 border-r min-w-[60px] align-bottom pb-3 text-center"
+                                            className="text-xs font-bold uppercase tracking-wider text-muted-foreground h-10 sticky left-[160px] z-20 bg-muted/20 border-r min-w-[130px] align-bottom pb-3 text-center"
                                         >
-                                            Edit
+                                            Actions
                                         </TableHead>
                                         <TableHead
                                             colSpan={allIndividualCols.length}

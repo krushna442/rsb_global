@@ -110,13 +110,23 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames, onRe
   };
 
   const handleSave = async () => {
-    if (!form.drawing_number.trim()) return toast.error("Drawing number is required");
+    let finalDrawingNumber = form.drawing_number;
+    let finalPartNumbers = partNumbers;
+
+    if (isRSB) {
+      const singlePart = partNumbers[0]?.trim();
+      if (!singlePart) return toast.error("Part number is required");
+      finalDrawingNumber = singlePart;
+      finalPartNumbers = [singlePart];
+    } else {
+      if (!finalDrawingNumber.trim()) return toast.error("Drawing number is required");
+    }
+
     setSaving(true);
     setProgress(0);
 
     try {
       let finalFilePath = null;
-      let finalBomPath = null;
 
       // Chunked Upload for main Drawing file
       if (file) {
@@ -146,19 +156,21 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames, onRe
         }
       }
 
-      // Regular upload for BOM (usually small, so keep it simple or implement same if needed)
-      // For now, if it's small, we can send it in the final request.
-      // But let's use the standard way.
-
       const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => fd.append(k, v));
-      const partNumberValue = partNumbers.filter(p => p.trim()).join(", ");
+      Object.entries(form).forEach(([k, v]) => {
+        if (k === "drawing_number") {
+          fd.append(k, finalDrawingNumber);
+        } else {
+          fd.append(k, v);
+        }
+      });
+      const partNumberValue = finalPartNumbers.filter(p => p.trim()).join(", ");
       fd.append("part_number", partNumberValue);
       
       if (finalFilePath) fd.append("file_path_from_chunks", finalFilePath);
       else if (file) fd.append("file", file); // fallback if small
 
-      if (bomFile) fd.append("bom_file", bomFile);
+      if (!isRSB && bomFile) fd.append("bom_file", bomFile);
 
       if (isEdit) {
         await api.put(`/drawings/${editDrawing!.id}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
@@ -175,11 +187,13 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames, onRe
       <DialogContent className="!max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogTitle>{isEdit ? "Edit Drawing" : "Add Drawing"}</DialogTitle>
         <div className="grid grid-cols-2 gap-3 mt-2">
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground">Drawing Number *</label>
-            <Input value={form.drawing_number} onChange={e => setForm(f => ({ ...f, drawing_number: e.target.value }))} className="mt-1" disabled={isEdit} />
-          </div>
-          <div>
+          {!isRSB && (
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground">Drawing Number *</label>
+              <Input value={form.drawing_number} onChange={e => setForm(f => ({ ...f, drawing_number: e.target.value }))} className="mt-1" disabled={isEdit} />
+            </div>
+          )}
+          <div className={isRSB ? "col-span-2" : ""}>
             <label className="text-xs font-semibold text-muted-foreground">Customer</label>
             <div className="flex gap-1.5 items-center mt-1">
               <select value={form.customer} onChange={e => setForm(f => ({ ...f, customer: e.target.value }))} className="flex-1 border rounded-md px-3 py-2 text-sm bg-background h-9">
@@ -213,53 +227,68 @@ function DrawingModal({ open, onClose, editDrawing, onSaved, customerNames, onRe
 
           {/* Part Numbers Section */}
           <div className="col-span-2">
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-semibold text-muted-foreground">Part Number(s)</label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addPartNumber}
-                className="h-6 px-2 text-xs gap-1"
-              >
-                <Plus className="w-3 h-3" />
-                Add
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {partNumbers.map((part, index) => (
-                <div key={index} className="flex items-center gap-1">
-                  <Input
-                    value={part}
-                    onChange={e => handlePartNumberChange(index, e.target.value)}
-                    placeholder={`Part #${index + 1}`}
-                    className="flex-1"
-                  />
-                  {partNumbers.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removePartNumber(index)}
-                      className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </Button>
-                  )}
+            {isRSB ? (
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">Part Number *</label>
+                <Input
+                  value={partNumbers[0] || ""}
+                  onChange={e => handlePartNumberChange(0, e.target.value)}
+                  placeholder="Enter part number"
+                  className="mt-1"
+                  disabled={isEdit}
+                />
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-muted-foreground">Part Number(s)</label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addPartNumber}
+                    className="h-6 px-2 text-xs gap-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add
+                  </Button>
                 </div>
-              ))}
-            </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {partNumbers.map((part, index) => (
+                    <div key={index} className="flex items-center gap-1">
+                      <Input
+                        value={part}
+                        onChange={e => handlePartNumberChange(index, e.target.value)}
+                        placeholder={`Part #${index + 1}`}
+                        className="flex-1"
+                      />
+                      {partNumbers.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removePartNumber(index)}
+                          className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
 
           <div>
             <label className="text-xs font-semibold text-muted-foreground">{isRSB ? "Drawing File" : "Drawing File"}</label>
-            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm w-full" />
+            <input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm w-full" />
             {saving && progress > 0 && <div className="h-1 bg-muted mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} /></div>}
           </div>
           {!isRSB && (
             <div>
               <label className="text-xs font-semibold text-muted-foreground">BOM File</label>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setBomFile(e.target.files?.[0] || null)} className="mt-1 block text-sm w-full" />
+              <input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={e => setBomFile(e.target.files?.[0] || null)} className="mt-1 block text-sm w-full" />
             </div>
           )}
         </div>
@@ -321,7 +350,7 @@ function NewVersionModal({ drawing, onClose, onSaved }: { drawing: Drawing | nul
       fd.append("remarks", remarks);
       if (finalFilePath) fd.append("file_path_from_chunks", finalFilePath);
       else fd.append("file", file);
-      if (bomFile) fd.append("bom_file", bomFile);
+      if (!isRSB && bomFile) fd.append("bom_file", bomFile);
 
       await api.post(`/drawings/${drawing!.id}/new-version`, fd, { headers: { "Content-Type": undefined } });
       toast.success("New version uploaded"); onSaved(); onClose();
@@ -341,11 +370,11 @@ function NewVersionModal({ drawing, onClose, onSaved }: { drawing: Drawing | nul
           </div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground">{isRSB ? "Drawing File *" : "Drawing File *"}</label>
-            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" />
+            <input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" />
             {saving && progress > 0 && <div className="h-1 bg-muted mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} /></div>}
           </div>
           {!isRSB && (
-            <div><label className="text-xs font-semibold text-muted-foreground">BOM File (optional)</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setBomFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>
+            <div><label className="text-xs font-semibold text-muted-foreground">BOM File (optional)</label><input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={e => setBomFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>
           )}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -587,6 +616,9 @@ export default function DrawingsPage() {
     drawings.forEach(d => { const c = d.customer || "Unknown"; map[c] = (map[c] || 0) + 1; });
     return map;
   }, [drawings]);
+  const isRSB = activeTab.toUpperCase() === "RSB";
+
+
 
   return (
     <DashboardLayout>
@@ -617,7 +649,7 @@ export default function DrawingsPage() {
             const color = TAB_COLORS[colorIdx];
             const isActive = activeTab === tab;
             return (
-              <div key={tab} className="relative group/tab flex">
+              <div key={tab} className="relative group/tab flex border-2 rounded-t-lg">
                 <button onClick={() => setActiveTab(tab)}
                   className={`px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-all flex items-center gap-1.5 ${isActive ? color.active + " -mb-px border-b-0 shadow-sm" : "bg-background border-transparent text-muted-foreground hover:text-foreground"}`}>
                   {tab === "ALL" ? "ALL Drawings" : tab}
@@ -642,7 +674,7 @@ export default function DrawingsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-muted/60 border-b">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground w-10">SR</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold  text-muted-foreground w-10">SR</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Drawing No.</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Description</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Joint</th>
@@ -650,8 +682,8 @@ export default function DrawingsPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Mod No.</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Mod Date</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">{activeTab?.toUpperCase() === "RSB" ? "Drawing" : "Document"}</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">BOM</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Remarks</th>
+{        !isRSB&&            <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">BOM</th>
+}                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Remarks</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Ver.</th>
                     {isAdmin && <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Actions</th>}
                   </tr>
@@ -675,8 +707,8 @@ export default function DrawingsPage() {
                       <td className="px-4 py-3 text-xs font-semibold">{d.modification_number || "—"}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{fmtDate(d.modification_date)}</td>
                       <td className="px-4 py-3"><FileLink path={d.file_path} label={d.customer?.toUpperCase() === "RSB" ? "Drawing" : "View"} /></td>
-                      <td className="px-4 py-3"><FileLink path={d.bom} label="BOM" /></td>
-                      <td className="px-4 py-3 text-xs max-w-[180px] truncate text-muted-foreground">
+{               !isRSB &&       <td className="px-4 py-3"><FileLink path={d.bom} label="BOM" /></td>
+}                      <td className="px-4 py-3 text-xs max-w-[180px] truncate text-muted-foreground">
                         {Array.isArray(d.remarks) ? d.remarks.join(", ") : (d.remarks || "—")}
                       </td>
                       <td className="px-4 py-3"><Badge variant="outline" className="text-[10px]">v{d.version}</Badge></td>

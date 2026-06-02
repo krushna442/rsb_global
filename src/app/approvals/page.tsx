@@ -91,6 +91,7 @@ export default function ProductionApprovalPage() {
     const [reviewedFields, setReviewedFields] = useState<Set<string>>(new Set());
     const [remark, setRemark] = useState("");
     const [searchQuery, setSearchQuery] = useState("");
+    const [activeTab, setActiveTab] = useState<"pending" | "approved" | "rejected">("pending");
 
 const allFields = [
   { key: "partNumber", label: formatLabel("partNumber") },
@@ -198,7 +199,13 @@ const allFields = [
                 {/* Stats */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     {stats.map((stat) => (
-                        <Card key={stat.label} className="border-0 shadow-sm">
+                        <Card
+                            key={stat.label}
+                            className={`border-0 shadow-sm cursor-pointer transition-all hover:shadow-md hover:scale-[1.02] ${
+                                activeTab === stat.label.toLowerCase() ? "ring-2 ring-offset-1 " + (stat.label === "Pending" ? "ring-orange-400" : stat.label === "Approved" ? "ring-emerald-400" : "ring-red-400") : ""
+                            }`}
+                            onClick={() => setActiveTab(stat.label.toLowerCase() as "pending" | "approved" | "rejected")}
+                        >
                             <CardContent className="p-4 flex items-center gap-3">
                                 <div className={`w-10 h-10 rounded-xl ${stat.bg} flex items-center justify-center`}>
                                     <span className={`text-lg font-bold ${stat.color}`}>{stat.count}</span>
@@ -221,7 +228,7 @@ const allFields = [
                 </div>
 
                 {/* Tabs */}
-                <Tabs defaultValue="pending" className="space-y-4">
+                <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "pending" | "approved" | "rejected")} className="space-y-4">
                     <TabsList className="bg-muted/50 h-9">
                         <TabsTrigger value="pending" className="text-xs data-[state=active]:shadow-sm">Pending</TabsTrigger>
                         <TabsTrigger value="approved" className="text-xs data-[state=active]:shadow-sm">Approved</TabsTrigger>

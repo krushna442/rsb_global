@@ -128,6 +128,7 @@ const MAIL_TYPE_LABELS: Record<MailType, string> = {
   day_scan_report:        "Day Scan Report",
   monthly_scan_report:    "Monthly Scan Report",
   monthly_product_report: "Monthly Product Report",
+  bearing_cup_mail:       "Bearing Cup Mail",
 };
 
 
