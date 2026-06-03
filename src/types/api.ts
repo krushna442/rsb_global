@@ -16,8 +16,9 @@ export interface DynamicFieldsData {
   important_fields: string[];
   documents: DocumentField[];
   customer_names: string[];
-standard_names: string[];
-control_plan_names: string[];
+  standard_names: string[];
+  control_plan_names: string[];
+  inactive_customers: string[];
   updated_at: string;
 }
 

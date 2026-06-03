@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useDynamicFields } from "@/contexts/DynamicFieldsContext";
+import api from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,6 +68,21 @@ export default function DynamicFieldsPage() {
     
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Customer addition/deactivation states
+    const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
+    const [newCustName, setNewCustName] = useState("");
+    const [customerOptions, setCustomerOptions] = useState<string[]>([]);
+
+    useEffect(() => {
+        api.get("/products/dropdown/options")
+            .then(res => {
+                if (res.data.success) {
+                    setCustomerOptions(res.data.data?.CUSTOMER_OPTIONS || []);
+                }
+            })
+            .catch(err => console.error("Error fetching options:", err));
+    }, []);
+
     if (loading && !data) {
         return (
             <DashboardLayout>
@@ -81,9 +97,88 @@ export default function DynamicFieldsPage() {
     const importantFields = data?.important_fields || [];
     const documents = data?.documents || [];
     const individualDocs = documents.filter(d => d.category === "individual");
-const ppapDocs = documents.filter(d => d.category === "ppap");
+    const ppapDocs = documents.filter(d => d.category === "ppap");
 
-const allDocs = [...individualDocs, ...ppapDocs];
+    const allDocs = [...individualDocs, ...ppapDocs];
+
+    const customerNames = data?.customer_names || [];
+    const inactiveCustomers = data?.inactive_customers || [];
+
+    const allCustomers = useMemo(() => {
+        const list = new Set<string>();
+        customerNames.forEach(c => list.add(c));
+        customerOptions.forEach(c => list.add(c));
+        return Array.from(list);
+    }, [customerNames, customerOptions]);
+
+    const handleToggleCustomerActive = async (customer: string, isCurrentlyActive: boolean) => {
+        if (isCurrentlyActive) {
+            if (!confirm(`Are you sure to inactive ${customer}?`)) {
+                return;
+            }
+        }
+        setIsSubmitting(true);
+        try {
+            let updatedInactive = [...inactiveCustomers];
+            if (isCurrentlyActive) {
+                if (!updatedInactive.includes(customer)) {
+                    updatedInactive.push(customer);
+                }
+            } else {
+                updatedInactive = updatedInactive.filter(c => c !== customer);
+            }
+            await updateFields({ inactive_customers: updatedInactive });
+        } catch (err) {
+            console.error("Error toggling customer status:", err);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleAddCustomer = async () => {
+        if (!newCustName.trim()) {
+            toast.error("Customer name is required");
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            const updated = [...customerNames];
+            if (!updated.includes(newCustName.trim())) {
+                updated.push(newCustName.trim());
+            }
+            await updateFields({ customer_names: updated });
+            setIsAddCustomerOpen(false);
+            setNewCustName("");
+            const optRes = await api.get("/products/dropdown/options");
+            if (optRes.data.success) {
+                setCustomerOptions(optRes.data.data?.CUSTOMER_OPTIONS || []);
+            }
+        } catch (err) {
+            console.error("Error adding customer:", err);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleDeleteCustomer = async (customer: string) => {
+        if (!confirm(`Are you sure you want to remove the customer option "${customer}"?`)) {
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            const updated = customerNames.filter(c => c !== customer);
+            const updatedInactive = inactiveCustomers.filter(c => c !== customer);
+            await updateFields({ 
+                customer_names: updated,
+                inactive_customers: updatedInactive 
+            });
+            setCustomerOptions(prev => prev.filter(c => c !== customer));
+        } catch (err) {
+            console.error("Error deleting customer option:", err);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
     // --- Handlers for Product Fields ---
     const handleAddField = async () => {
@@ -270,6 +365,65 @@ const allDocs = [...individualDocs, ...ppapDocs];
                                 </Table>
                             </CardContent>
                         </Card>
+
+                        {/* Customers Section */}
+                        <Card className="border-0 shadow-sm overflow-hidden">
+                            <CardHeader className="bg-muted/10 border-b px-6 py-4 flex flex-row items-center justify-between">
+                                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                    <Sliders className="w-4 h-4 text-primary" />
+                                    Customer Configurations
+                                    <Badge variant="secondary" className="text-[10px] uppercase tracking-wider">{allCustomers.length}</Badge>
+                                </CardTitle>
+                                <Button size="sm" variant="outline" onClick={() => setIsAddCustomerOpen(true)} className="h-8 gap-1.5 text-xs">
+                                    <Plus className="w-3.5 h-3.5" /> Add Customer
+                                </Button>
+                            </CardHeader>
+                            <CardContent className="p-0">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                                            <TableHead className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground h-10 pl-6">Customer Name</TableHead>
+                                            <TableHead className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground h-10">Status</TableHead>
+                                            <TableHead className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground h-10 pr-6 text-right">Actions</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {allCustomers.map((customer) => {
+                                            const isInactive = inactiveCustomers.includes(customer);
+                                            return (
+                                                <TableRow key={customer} className="group hover:bg-muted/20 transition-colors">
+                                                    <TableCell className="pl-6 py-3 font-medium text-sm">{customer}</TableCell>
+                                                    <TableCell>
+                                                        <Badge className={`text-[10px] font-bold uppercase ${isInactive ? 'bg-red-100 text-red-700 hover:bg-red-100' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100'}`}>
+                                                            {isInactive ? 'Inactive' : 'Active'}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="pr-6 text-right space-x-2">
+                                                        <Button 
+                                                            variant="outline" 
+                                                            size="sm" 
+                                                            className={`h-7 px-2.5 text-xs ${isInactive ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50' : 'border-red-200 text-red-700 hover:bg-red-50'}`}
+                                                            onClick={() => handleToggleCustomerActive(customer, !isInactive)}
+                                                            disabled={isSubmitting}
+                                                        >
+                                                            {isInactive ? 'Activate' : 'Deactivate'}
+                                                        </Button>
+                                                        
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                        {allCustomers.length === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={3} className="text-center py-6 text-muted-foreground text-sm">
+                                                    No customers found.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
                     </div>
 
                     {/* Important Fields Sidebar */}
@@ -443,6 +597,34 @@ const allDocs = [...individualDocs, ...ppapDocs];
                     <DialogFooter>
                         <Button variant="outline" size="sm" onClick={() => setIsAddDocOpen(false)} disabled={isSubmitting}>Cancel</Button>
                         <Button size="sm" onClick={handleAddDocument} disabled={isSubmitting || !newDocName}>Add Document</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Add Customer Dialog */}
+            <Dialog open={isAddCustomerOpen} onOpenChange={setIsAddCustomerOpen}>
+                <DialogContent className="sm:max-w-[400px]">
+                    <DialogHeader>
+                        <DialogTitle>Add Customer</DialogTitle>
+                        <DialogDescription className="text-xs">
+                            Define a new customer in the master dropdown list.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="custName" className="text-xs">Customer Name</Label>
+                            <Input 
+                                id="custName"
+                                placeholder="e.g. ALL PNR" 
+                                value={newCustName} 
+                                onChange={(e) => setNewCustName(e.target.value)}
+                                className="h-9 text-sm"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setIsAddCustomerOpen(false)} disabled={isSubmitting}>Cancel</Button>
+                        <Button size="sm" onClick={handleAddCustomer} disabled={isSubmitting || !newCustName.trim()}>Add Customer</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

@@ -46,8 +46,8 @@ const fmtDate = (d: string) =>
   new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
 const partConfig = [
-  { key: "front" as const, label: "Front", color: "text-orange-700", bg: "bg-orange-50", headerBg: "bg-orange-100", chartColor: "#ea580c" },
-  { key: "rear"  as const, label: "Rear",  color: "text-blue-700",   bg: "bg-blue-50",   headerBg: "bg-blue-100",   chartColor: "#2563eb" },
+  { key: "front" as const, label: "Line-1(Front)", color: "text-orange-700", bg: "bg-orange-50", headerBg: "bg-orange-100", chartColor: "#ea580c" },
+  { key: "rear"  as const, label: "Line-2(Rear)",  color: "text-blue-700",   bg: "bg-blue-50",   headerBg: "bg-blue-100",   chartColor: "#2563eb" },
   { key: "ia"    as const, label: "IA",    color: "text-emerald-700", bg: "bg-emerald-50", headerBg: "bg-emerald-100", chartColor: "#059669" },
 ];
 

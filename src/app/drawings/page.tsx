@@ -535,7 +535,9 @@ export default function DrawingsPage() {
   const fetchCustomerNames = useCallback(async () => {
     try {
       const r = await api.get("/dynamic-fields");
-      setCustomerNames(r.data.data?.customer_names || []);
+      const allCust = r.data.data?.customer_names || [];
+      const inactiveCust = r.data.data?.inactive_customers || [];
+      setCustomerNames(allCust.filter((c: string) => !inactiveCust.includes(c)));
     } catch {}
   }, []);
 

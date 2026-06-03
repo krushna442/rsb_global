@@ -206,15 +206,45 @@ productsForGraphs?.forEach(scan => {
     return orderedWeekData;
   }, [productsForGraphs]);
 
-  // 5. Monthly Trend
+  // 5. Monthly Trend (last 6 months dynamically calculated)
   const verificationTrend = useMemo(() => {
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const currentMonth = months[new Date().getMonth()];
-    return [
-      { month: "Prev", verified: (scanStats?.pass || 0) * 0.8, pending: 20, rejected: 5 },
-      { month: currentMonth, verified: scanStats?.pass || 0, pending: scanStats?.total ? scanStats.total - scanStats.pass - scanStats.rejected : 0, rejected: scanStats?.rejected || 0 },
-    ];
-  }, [scanStats]);
+    const dataBuckets: { month: string; monthIndex: number; year: number; accepted: number; rejected: number }[] = [];
+    
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      dataBuckets.push({
+        month: `${months[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
+        monthIndex: d.getMonth(),
+        year: d.getFullYear(),
+        accepted: 0,
+        rejected: 0,
+      });
+    }
+
+    productsForGraphs?.forEach(scan => {
+      if (!scan.created_at) return;
+      const date = new Date(scan.created_at);
+      const scanMonth = date.getMonth();
+      const scanYear = date.getFullYear();
+
+      const bucket = dataBuckets.find(b => b.monthIndex === scanMonth && b.year === scanYear);
+      if (bucket) {
+        if (scan.validation_status === "pass") {
+          bucket.accepted++;
+        } else if (scan.validation_status === "fail") {
+          bucket.rejected++;
+        }
+      }
+    });
+
+    return dataBuckets.map(({ month, accepted, rejected }) => ({
+      month,
+      accepted,
+      rejected,
+    }));
+  }, [productsForGraphs]);
 
   // NEW: Row 1 - Approval Status Data
   const productionApprovalData = useMemo(() => {
@@ -374,22 +404,14 @@ productsForGraphs?.forEach(scan => {
             </CardHeader>
             <CardContent className="pt-2">
               <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={verificationTrend}>
-                  <defs>
-                    <linearGradient id="colorVerified" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
+                <BarChart data={verificationTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                   <XAxis dataKey="month" tick={{ fontSize: 11, fontWeight: 500 }} tickLine={false} axisLine={false} dy={10} />
                   <YAxis tick={{ fontSize: 11, fontWeight: 500 }} tickLine={false} axisLine={false} />
-                  <Tooltip 
-                    contentStyle={{ fontSize: 12, borderRadius: 12, border: "none", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)" }} 
-                  />
-                  <Area type="monotone" dataKey="verified" stroke="#3b82f6" strokeWidth={3} fill="url(#colorVerified)" />
-                  <Area type="monotone" dataKey="rejected" stroke="#ef4444" strokeWidth={2} fill="transparent" strokeDasharray="5 5" />
-                </AreaChart>
+                  <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
+                  <Bar dataKey="accepted" name="Accepted" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
+                  <Bar dataKey="rejected" name="Rejected" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
+                </BarChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>

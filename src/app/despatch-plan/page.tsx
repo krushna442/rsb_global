@@ -563,7 +563,9 @@ export default function DespatchPlanPage() {
         api.get(`/despatch-plan?date=${date}`),
         api.get("/dynamic-fields"),
       ]);
-      setCustomerOptions(dynRes.data.data?.customer_names || []);
+      const allCust = dynRes.data.data?.customer_names || [];
+      const inactiveCust = dynRes.data.data?.inactive_customers || [];
+      setCustomerOptions(allCust.filter((c: string) => !inactiveCust.includes(c)));
       setIncompleteFromPrev(planRes.data.incompleteFromPrev || []);
 
       const plan: DespatchPlan | null = planRes.data.plan;

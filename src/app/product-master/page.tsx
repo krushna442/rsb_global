@@ -128,12 +128,12 @@ export default function ProductMasterPage() {
   const [showRemarksModal, setShowRemarksModal] = useState(false);
   const [remarksProduct, setRemarksProduct] = useState<{
     partNumber: string;
-    remarks: string[];
+    remarks: any[];
   } | null>(null);
 
   const handleRemarksClick = (product: any) => {
     const rawRemarks = product.remarks;
-    const remarks: string[] = Array.isArray(rawRemarks)
+    const remarks: any[] = Array.isArray(rawRemarks)
       ? rawRemarks
       : typeof rawRemarks === "string"
         ? (() => {
@@ -947,7 +947,7 @@ const drawing =
                               // ── Remarks: show last entry only ────────────────
                               if (fieldName === "remarks") {
                                 const rawRemarks = (product as any).remarks;
-                                const remarksArr: string[] = Array.isArray(
+                                const remarksArr: any[] = Array.isArray(
                                   rawRemarks,
                                 )
                                   ? rawRemarks
@@ -960,10 +960,11 @@ const drawing =
                                         }
                                       })()
                                     : [];
-                                const lastRemark =
+                                const lastItem =
                                   remarksArr.length > 0
                                     ? remarksArr[remarksArr.length - 1]
                                     : null;
+                                const lastRemark = lastItem && typeof lastItem === "object" ? lastItem.remark : lastItem;
                                 return (
                                   <TableCell
                                     key={fieldName}
@@ -1373,26 +1374,50 @@ const drawing =
           </DialogHeader>
           <div className="mt-2 space-y-2 max-h-[60vh] overflow-y-auto pr-1">
             {remarksProduct && remarksProduct.remarks.length > 0 ? (
-              remarksProduct.remarks.map((remark, idx) => (
-                <div
-                  key={idx}
-                  className={`flex gap-3 p-3 rounded-md border text-sm ${
-                    idx === remarksProduct.remarks.length - 1
-                      ? "bg-primary/5 border-primary/20 text-foreground font-medium"
-                      : "bg-muted/30 border-border/50 text-muted-foreground"
-                  }`}
-                >
-                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-semibold text-muted-foreground mt-0.5">
-                    {idx + 1}
-                  </span>
-                  <span className="leading-relaxed">{remark}</span>
-                  {idx === remarksProduct.remarks.length - 1 && (
-                    <span className="ml-auto flex-shrink-0 text-[10px] text-primary font-normal self-start mt-0.5">
-                      latest
-                    </span>
-                  )}
-                </div>
-              ))
+              remarksProduct.remarks.map((item, idx) => {
+                const isObj = item && typeof item === "object";
+                const remarkText = isObj ? item.remark : String(item);
+                const remarkDate = isObj && item.date ? new Date(item.date).toLocaleString('en-IN') : null;
+                const source = isObj ? item.source : null;
+                const isRejection = isObj ? item.is_rejection : false;
+
+                return (
+                  <div
+                    key={idx}
+                    className={`flex flex-col gap-2 p-3 rounded-md border text-sm ${
+                      idx === remarksProduct.remarks.length - 1
+                        ? "bg-primary/5 border-primary/20 text-foreground font-medium"
+                        : "bg-muted/30 border-border/50 text-muted-foreground"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-semibold text-muted-foreground">
+                        {idx + 1}
+                      </span>
+                      {source && (
+                        <Badge variant="outline" className={`text-[9px] px-1.5 h-4 uppercase ${
+                          source === 'production' 
+                            ? 'bg-blue-50 text-blue-700 border-blue-200' 
+                            : source === 'quality' 
+                            ? 'bg-purple-50 text-purple-700 border-purple-200'
+                            : 'bg-gray-50 text-gray-700 border-gray-200'
+                        }`}>
+                          {source} {isRejection ? "(Rejection)" : ""}
+                        </Badge>
+                      )}
+                      {remarkDate && (
+                        <span className="text-[10px] text-muted-foreground ml-auto">{remarkDate}</span>
+                      )}
+                      {idx === remarksProduct.remarks.length - 1 && !remarkDate && (
+                        <span className="ml-auto flex-shrink-0 text-[10px] text-primary font-normal">
+                          latest
+                        </span>
+                      )}
+                    </div>
+                    <div className="leading-relaxed pl-7">{remarkText}</div>
+                  </div>
+                );
+              })
             ) : (
               <p className="text-sm text-muted-foreground text-center py-6">
                 No remarks found.
