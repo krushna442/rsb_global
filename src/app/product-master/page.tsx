@@ -206,11 +206,11 @@ const drawing =
         ""
       ).toLowerCase();
 
-      const tubeLen = (
-        (p as any).tubeLength ||
-        p.specification?.tubeLength ||
-        ""
-      ).toLowerCase();
+const tubeLen = String(
+  (p as any).tubeLength ??
+  p.specification?.tubeLength ??
+  ""
+).toLowerCase();
 
       return (
         partNum.includes(lowerQuery) ||

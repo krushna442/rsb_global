@@ -115,15 +115,32 @@ interface PDIReportResponse {
 
 // ─── Excel Generation Logic ───────────────────────────────────────────────────
 
-function randomVariation(base: number, range = 2): number {
-  return base + Math.round((Math.random() * range * 2) - range);
+// ── Matches the cron's randomVariant exactly ─────────────────────────────────
+// tubeLength → range 1 (±1), totalLength → range 2 (±2)
+// If base is 0 or NaN, returns 0 unchanged.
+function randomVariant(base: number, range = 2): number {
+  const n = Math.round(base);
+  if (isNaN(n) || n === 0) return 0;
+  const sign  = Math.random() < 0.5 ? -1 : 1;
+  const delta = Math.floor(Math.random() * (range + 1)); // 0..range inclusive
+  return n + sign * delta;
 }
 
-function parseNumeric(val: string | undefined): number | null {
-  if (!val) return null;
-  const cleaned = val.replace(/[±²³°]/g, "").replace(/[^0-9.]/g, "").trim();
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? null : n;
+// ── Simple tube-length parse: just parseInt ───────────────────────────────────
+function parseTubeLength(val: string | undefined): number {
+  if (!val) return 0;
+  const n = parseInt(String(val), 10);
+  return isNaN(n) ? 0 : n;
+}
+
+// ── Total-length parse: strip ±tolerance FIRST, then numeric base ─────────────
+// e.g. "3392±5" → 3392,  "1060±2" → 1060,  "1060" → 1060
+// Split ONLY on the ± Unicode char so a dash inside a part number is kept intact.
+function parseTotalLength(val: string | undefined): number {
+  if (!val) return 0;
+  const cleaned = String(val).split('\u00B1')[0].replace(/[^0-9]/g, '');
+  const n = parseInt(cleaned, 10);
+  return isNaN(n) ? 0 : n;
 }
 
 function generateObservationsForShift(
@@ -134,15 +151,16 @@ function generateObservationsForShift(
   const sampleCount = Math.min(shiftGroup.sampleSize, 5);
   const obs: Record<string, (string | number)[]> = {};
 
-  const tubeBase = parseNumeric(spec?.tubeLength);
-  const totalBase = parseNumeric(spec?.totalLength);
+  const tubeBase  = parseTubeLength(spec?.tubeLength);
+  const totalBase = parseTotalLength(spec?.totalLength);
 
-  // Fields with ±2 numeric variation
+  // tubeLength  → ±1 variation (matches cron range=1)
   obs.tubeLength = Array.from({ length: sampleCount }, () =>
-    tubeBase ? randomVariation(tubeBase, 2) : "Ok"
+    tubeBase ? randomVariant(tubeBase, 1) : "Ok"
   );
+  // totalFlange → ±2 variation (matches cron range=2); NO ×10 multiplier
   obs.totalFlange = Array.from({ length: sampleCount }, () =>
-    totalBase ? randomVariation(totalBase * 10, 2) : "Ok" // multiply for mm representation
+    totalBase ? randomVariant(totalBase, 2) : "Ok"
   );
 
   // Scanned text from actual records

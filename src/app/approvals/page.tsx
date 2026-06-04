@@ -313,10 +313,11 @@ const allFields = [
                         
                         const fieldsToReview = hasEditedFields
                             ? allFields.filter(f => {
+                                if (f.key === "unbalanceInGram75Percent") return false;
                                 const checkKey = f.key === 'partNumber' ? 'part_number' : f.key;
                                 return editedFields.includes(f.key) || editedFields.includes(checkKey);
                             })
-                            : allFields;
+                            : allFields.filter(f => f.key !== "unbalanceInGram75Percent");
 
                         const totalCount = fieldsToReview.length;
                         const reviewedCount = fieldsToReview.filter(f => reviewedFields.has(f.key)).length;
@@ -366,7 +367,8 @@ const allFields = [
                                 {/* Field grid */}
                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
                                     {allFields.map(({ key, label }) => {
-                                        const isReviewed = reviewedFields.has(key);
+                                        const isAutoVerified = key === "unbalanceInGram75Percent";
+                                        const isReviewed = isAutoVerified || reviewedFields.has(key);
                                         const topLevelMap: Record<string, string> = {
                                             partNumber: 'part_number',
                                             customer: 'customer',
@@ -383,8 +385,10 @@ const allFields = [
                                         return (
                                             <div
                                                 key={key}
-                                                onClick={() => handleFieldClick(key)}
-                                                className={`relative cursor-pointer rounded-lg border-2 p-3 transition-all duration-100 select-none
+                                                onClick={() => {
+                                                    if (!isAutoVerified) handleFieldClick(key);
+                                                }}
+                                                className={`relative ${isAutoVerified ? 'cursor-default opacity-80' : 'cursor-pointer'} rounded-lg border-2 p-3 transition-all duration-100 select-none
                                                     ${isReviewed
                                                         ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
                                                         : isEdited
@@ -398,13 +402,19 @@ const allFields = [
                                                         EDITED
                                                     </span>
                                                 )}
+                                                {/* Auto-Verified Badge */}
+                                                {isAutoVerified && (
+                                                    <span className="absolute top-2 left-2 text-[10px] font-bold text-emerald-600 bg-emerald-100 dark:bg-emerald-900/50 dark:text-emerald-400 px-1.5 py-0.5 rounded">
+                                                        AUTO
+                                                    </span>
+                                                )}
                                                 {/* Checkmark badge */}
                                                 {isReviewed && (
                                                     <span className="absolute top-2 right-2 text-emerald-600">
                                                         <CheckCircle2 className="w-4 h-4" />
                                                     </span>
                                                 )}
-                                                <span className={`text-muted-foreground block text-xs mb-1 ${isEdited && !isReviewed ? 'mt-4' : ''} pr-5`}>{label}</span>
+                                                <span className={`text-muted-foreground block text-xs mb-1 ${(isEdited && !isReviewed) || isAutoVerified ? 'mt-4' : ''} pr-5`}>{label}</span>
                                                 <span className={`font-bold text-sm break-words ${isReviewed ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
                                                     {value || "-"}
                                                 </span>

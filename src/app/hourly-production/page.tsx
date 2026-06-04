@@ -120,8 +120,35 @@ export default function HourlyProductionPage() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [deletedIds, setDeletedIds] = useState<number[]>([]);
+
+  const recordsRef = React.useRef(records);
+  const deletedIdsRef = React.useRef(deletedIds);
+  React.useEffect(() => { recordsRef.current = records; }, [records]);
+  React.useEffect(() => { deletedIdsRef.current = deletedIds; }, [deletedIds]);
+  const debounceTimer = React.useRef<NodeJS.Timeout | null>(null);
+
+  // ── current hour tracker ──────────────────────────────────────────────────────
+  const [currentHour, setCurrentHour] = useState(() => {
+    const now = new Date();
+    let h = now.getHours();
+    return h < 6 ? h + 24 : h;
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      let h = now.getHours();
+      const computedH = h < 6 ? h + 24 : h;
+      setCurrentHour(prev => {
+        if (prev !== computedH) return computedH;
+        return prev;
+      });
+    }, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
 
   // ── cumulative state ─────────────────────────────────────────────────────────
   const [summaryMonth, setSummaryMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -148,7 +175,11 @@ export default function HourlyProductionPage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { loadDaily(date); }, [date, loadDaily]);
+  useEffect(() => {
+    if (!debounceTimer.current) {
+      loadDaily(date);
+    }
+  }, [date, currentHour, loadDaily]);
 
   const loadSummary = useCallback(async (ym: string) => {
     const [year, month] = ym.split("-");
@@ -181,6 +212,44 @@ export default function HourlyProductionPage() {
     }
   }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── auto save logic ───────────────────────────────────────────────────────────
+  const scheduleAutoSave = useCallback(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(async () => {
+      debounceTimer.current = null;
+      setIsAutoSaving(true);
+      try {
+        const currentDeleted = [...deletedIdsRef.current];
+        const currentRecords = [...recordsRef.current];
+        
+        for (const id of currentDeleted) await api.delete(`/hourly-production/${id}`);
+        setDeletedIds(prev => prev.filter(id => !currentDeleted.includes(id)));
+        
+        let requiresReload = currentDeleted.length > 0;
+        
+        for (const r of currentRecords) {
+          if (r.isNew) {
+            if (r.tube_length || r.quantity > 0 || r.remarks) {
+              await api.post("/hourly-production", { production_date: date, hour_slot: r.hour_slot, part_type: r.part_type, tube_length: r.tube_length, quantity: r.quantity, remarks: r.remarks });
+              requiresReload = true;
+            }
+          } else if (r.id) {
+            await api.put(`/hourly-production/${r.id}`, { tube_length: r.tube_length, quantity: r.quantity, remarks: r.remarks });
+          }
+        }
+        
+        if (requiresReload && !debounceTimer.current) {
+          loadDaily(date);
+          loadSummary(summaryMonth);
+        }
+      } catch {
+        console.error("Auto-save failed");
+      } finally {
+        setIsAutoSaving(false);
+      }
+    }, 1500);
+  }, [date, loadDaily, loadSummary, summaryMonth]);
+
   // ── daily helpers ─────────────────────────────────────────────────────────────
   const getRecords = useCallback(
     (hour_slot: number, part_type: "front" | "rear" | "ia"): RecordRow[] => {
@@ -212,11 +281,13 @@ export default function HourlyProductionPage() {
       }
       return prev;
     });
+    scheduleAutoSave();
   };
 
   const handleAddRow = (hour_slot: number, part_type: "front" | "rear" | "ia") => {
     if (!canEdit) return;
     setRecords((prev) => [...prev, { production_date: date, hour_slot, part_type, tube_length: "", quantity: 0, remarks: "", isNew: true }]);
+    scheduleAutoSave();
   };
 
   const handleRemoveRow = (hour_slot: number, part_type: "front" | "rear" | "ia", index: number) => {
@@ -237,6 +308,7 @@ export default function HourlyProductionPage() {
       }
       return prev;
     });
+    scheduleAutoSave();
   };
 
   const handleSave = async () => {
@@ -280,18 +352,15 @@ export default function HourlyProductionPage() {
   // Always show all 24 slots (6 AM to next 6 AM)
   const filteredHours = HOURS;
 
-  // For viewer: compute which slots are editable (current slot + last 2 before it)
+  // For viewer: compute which slots are editable (current slot + last 2 before it, and 1 next slot)
   const viewerEditableSlots = useMemo(() => {
-    const now = new Date();
-    let h = now.getHours();
-    if (h < 6) h += 24;
     const editableSet = new Set<number>();
-    for (let offset = 0; offset <= 2; offset++) {
-      const slot = h - offset;
-      if (slot >= 6) editableSet.add(slot);
+    for (let offset = -1; offset <= 2; offset++) {
+      const slot = currentHour - offset;
+      if (slot >= 6 && slot <= 29) editableSet.add(slot);
     }
     return editableSet;
-  }, []);
+  }, [currentHour]);
 
   // ── Real-time sync: refresh when another client changes data ─────────────────
   // Only reloads if the event's date matches our currently viewed date.
@@ -357,10 +426,19 @@ export default function HourlyProductionPage() {
                   <CalendarIcon className="w-4 h-4 text-muted-foreground" />
                   <input type="date" className="text-sm border-none bg-transparent outline-none cursor-pointer" value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
-                <Button onClick={handleSave} disabled={loading || saving} className="gap-1.5">
+                <Button variant="outline" onClick={() => loadDaily(date)} disabled={loading || saving || isAutoSaving} className="gap-1.5 px-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={loading ? "animate-spin" : ""}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                  Refresh
+                </Button>
+                <Button onClick={handleSave} disabled={loading || saving || isAutoSaving} className="gap-1.5">
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   Save Board
                 </Button>
+                {isAutoSaving && (
+                  <span className="text-xs font-semibold text-muted-foreground animate-pulse flex items-center gap-1.5 bg-slate-100 px-2 py-1.5 rounded-md">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Auto-saving...
+                  </span>
+                )}
               </>
             )}
           </div>
