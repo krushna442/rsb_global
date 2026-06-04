@@ -1173,9 +1173,7 @@ export default function PDIPartReportPage() {
     const formData = new FormData();
     formData.append("name", user?.name || user?.username || "Manual Upload");
     formData.append("file", file);
-    if (manualPartNumber.trim()) {
-      formData.append("part_number", manualPartNumber.trim());
-    }
+    formData.append("part_number", manualPartNumber.trim().toUpperCase());
 
     try {
       const res = await api.post("/pdi-manual", formData, {
@@ -1528,8 +1526,31 @@ export default function PDIPartReportPage() {
         onChange={handleManualUpload}
         accept=".pdf,.xlsx,.xls,.png,.jpg,.jpeg,.doc,.docx"
       />
+      {/* Part Number Input - Required Before Upload */}
+      <div style={{ marginBottom: 16 }}>
+        <label className="label-text" style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+          Part Number <span style={{ color: "#dc2626" }}>*</span>
+        </label>
+        <input
+          className="input-field"
+          type="text"
+          placeholder="Enter Part Number before uploading (e.g. FEA55000)"
+          value={manualPartNumber}
+          onChange={(e) => setManualPartNumber(e.target.value.toUpperCase())}
+          style={{ fontFamily: "'DM Mono', monospace", textTransform: "uppercase", maxWidth: 360 }}
+        />
+        {!manualPartNumber.trim() && (
+          <p style={{ margin: "4px 0 0", fontSize: 11, color: "#dc2626" }}>Part number is required before uploading a document.</p>
+        )}
+      </div>
       <div
-        onClick={() => !uploadingManual && fileInputRef.current?.click()}
+        onClick={() => {
+          if (!manualPartNumber.trim()) {
+            toast.error("Please enter a Part Number before uploading.");
+            return;
+          }
+          if (!uploadingManual) fileInputRef.current?.click();
+        }}
         onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = "#3b82f6"; e.currentTarget.style.background = "#eff6ff"; }}
         onDragLeave={(e) => { e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.background = "#fafafa"; }}
         onDrop={(e) => {
@@ -1538,6 +1559,10 @@ export default function PDIPartReportPage() {
           e.currentTarget.style.background = "#fafafa";
           const file = e.dataTransfer.files?.[0];
           if (!file || uploadingManual) return;
+          if (!manualPartNumber.trim()) {
+            toast.error("Please enter a Part Number before uploading.");
+            return;
+          }
           // Trigger upload manually
           const dt = new DataTransfer();
           dt.items.add(file);
@@ -1610,6 +1635,9 @@ export default function PDIPartReportPage() {
               <tr style={{ borderBottom: "1.5px solid #e5e7eb", background: "#f9fafb" }}>
 
                 <th style={{ padding: "12px 16px", textAlign: "left", color: "#6b7280", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Part Number
+                </th>
+                <th style={{ padding: "12px 16px", textAlign: "left", color: "#6b7280", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   Uploaded By
                 </th>
                 <th style={{ padding: "12px 16px", textAlign: "left", color: "#6b7280", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -1638,8 +1666,10 @@ export default function PDIPartReportPage() {
                       background: idx % 2 === 0 ? "#fff" : "#fafafa",
                     }}
                   >
-                    {/* File name */}
-
+                    {/* Part Number */}
+                    <td style={{ padding: "12px 16px", color: "#1F3864", fontFamily: "'DM Mono', monospace", fontSize: 12, fontWeight: 700 }}>
+                      {record.part_number || <span style={{ color: "#9ca3af", fontSize: 11 }}>—</span>}
+                    </td>
 
                     {/* Uploaded by */}
                     <td style={{ padding: "12px 16px", color: "#4b5563" }}>

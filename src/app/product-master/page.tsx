@@ -206,10 +206,17 @@ const drawing =
         ""
       ).toLowerCase();
 
+      const tubeLen = (
+        (p as any).tubeLength ||
+        p.specification?.tubeLength ||
+        ""
+      ).toLowerCase();
+
       return (
         partNum.includes(lowerQuery) ||
         customer.includes(lowerQuery) ||
-        vendor.includes(lowerQuery)
+        vendor.includes(lowerQuery) ||
+        tubeLen.includes(lowerQuery)
       );
     });
   }, [products, statusFilter, searchQuery]);

@@ -1012,7 +1012,7 @@ export default function DocumentsPage() {
         category: string;
     } | null>(null);
     const [editProductId, setEditProductId] = useState<number | null>(null);
-    const [downloadingZipId, setDownloadingZipId] = useState<number | null>(null);
+    const [downloadingZipId, setDownloadingZipId] = useState<{ id: number; type: string } | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
 
     const editProduct = useMemo(() => 
@@ -1048,7 +1048,7 @@ export default function DocumentsPage() {
         );
         if (!confirmed) return;
 
-        setDownloadingZipId(product.id);
+        setDownloadingZipId({ id: product.id, type });
         try {
             const zip = new JSZip();
             await Promise.all(
@@ -1707,15 +1707,38 @@ export default function DocumentsPage() {
                                                     >
                                                         <Pencil className="w-3.5 h-3.5" />
                                                     </button>
+                                                    {/* Download All */}
                                                     <button
-                                                        onClick={() => handleDownloadZip(product)}
-                                                        disabled={downloadingZipId === product.id}
+                                                        onClick={() => handleDownloadZip(product, "all")}
+                                                        disabled={downloadingZipId?.id === product.id}
                                                         className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-muted/60 hover:bg-emerald-100 hover:text-emerald-700 text-muted-foreground transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        title="Download all documents as ZIP"
+                                                        title="Download ALL documents as ZIP"
                                                     >
-                                                        {downloadingZipId === product.id
+                                                        {downloadingZipId?.id === product.id && downloadingZipId.type === "all"
                                                             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                                             : <Download className="w-3.5 h-3.5" />}
+                                                    </button>
+                                                    {/* Download Individual */}
+                                                    <button
+                                                        onClick={() => handleDownloadZip(product, "individual")}
+                                                        disabled={downloadingZipId?.id === product.id}
+                                                        className="inline-flex items-center justify-center px-1.5 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-[10px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        title="Download Individual documents as ZIP"
+                                                    >
+                                                        {downloadingZipId?.id === product.id && downloadingZipId.type === "individual"
+                                                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                                                            : "IND"}
+                                                    </button>
+                                                    {/* Download PPAP */}
+                                                    <button
+                                                        onClick={() => handleDownloadZip(product, "ppap")}
+                                                        disabled={downloadingZipId?.id === product.id}
+                                                        className="inline-flex items-center justify-center px-1.5 h-7 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-[10px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        title="Download PPAP documents as ZIP"
+                                                    >
+                                                        {downloadingZipId?.id === product.id && downloadingZipId.type === "ppap"
+                                                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                                                            : "PPAP"}
                                                     </button>
                                                     </div>
                                                 </TableCell>

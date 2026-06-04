@@ -65,6 +65,7 @@ const ALL_SPECS = [
     { id: "Series",                   label: "Series",                         valueKey: "series"                       },
     { id: "TypeOfPart",               label: "Part Type",                      valueKey: "partType"                     },
     { id: "Noise_Deadener",           label: "Available Noise Deadener",       valueKey: "availableNoiseDeadener"       },
+    { id: "Noise_Deadener_Length",    label: "Noise Deadener Length",          valueKey: "noiseDeadenerLength"          },
     { id: "Fep_Press_H",              label: "Fep Press H. Stock Positions",   valueKey: "fepPressHStockPositions"      },
     { id: "Rear_Housing",             label: "Rear Housing length",            valueKey: "rearHousingLength"            },
     { id: "Long_Fork",                label: "Long Fork Length",               valueKey: "longForkLength"               },

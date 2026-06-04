@@ -78,7 +78,7 @@ const INITIAL_FORM_STATE = {
 
 const allColumns = [
     "TubeLength", "Tube_Dia_Thickness", "Series", "TypeOfPart", 
-    "Noise_Deadener", "Fep_Press_H", "Rear_Housing", "Long_Fork",
+    "Noise_Deadener","Noise_Deadener_Length", "Fep_Press_H", "Rear_Housing", "Long_Fork",
     "SF_Details", "PDC_Length", "Front_End_Piece", "Flange_Yoke",
     "Greaseable_NonGreaseable", "Coupling_Flange", "Coupling_Orientation", 
     "CB_Kit", "Loctite_Grade", "Tightening_Torque", "Balancing_RPM", 
@@ -429,6 +429,30 @@ const handleCheckboxToggle = <T extends string>(
                 <div className="text-muted-foreground text-xs">{MAIL_TYPE_LABELS[type]}</div>
               </div>
             ))}
+                  <div className="space-y-1.5 my-5 flex flex-col items-center gap-6">
+        <div className="flex items-center gap-5">
+          <Checkbox
+            checked={formData.show_image === "true"}
+            onCheckedChange={handleCheckboxChange}
+            disabled={modalMode === "view"}
+            className="h-4 w-4 disabled:opacity-50"
+          />
+          <Label className="text-xs font-semibold text-muted-foreground">
+            Show Product Image
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            checked={despatchMail}
+            onCheckedChange={(v) => setDespatchMail(v === true)}
+            disabled={modalMode === "view"}
+            className="h-4 w-4 disabled:opacity-50"
+          />
+          <Label className="text-xs font-semibold text-muted-foreground">
+            Receive Despatch Mail
+          </Label>
+        </div>
+      </div>
           </div>
 
         </div>
