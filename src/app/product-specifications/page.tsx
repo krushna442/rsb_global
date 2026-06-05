@@ -514,15 +514,6 @@ export default function ProductSpecificationsPage() {
                                 <>
                                     <div className="flex items-center gap-3 mb-6 mt-4">
                                         <div className="h-8 w-1.5 bg-[#007a6e] rounded-full" />
-                                        <h2 style={{ 
-                                            fontSize: "24px", 
-                                            fontWeight: "900", 
-                                            color: "#007a6e", 
-                                            letterSpacing: "0.5px",
-                                            textTransform: "uppercase"
-                                        }}>
-                                            Reference  Images
-                                        </h2>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                                         {matchingImages.map((img) => {
