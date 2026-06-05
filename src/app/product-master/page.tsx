@@ -859,9 +859,14 @@ const tubeLen = String(
                         product.specification?.unbalanceInGram;
                       const derived75 = compute75Percent(rawGram);
 
-                      const hasDrawing = (
-                        product as any
-                      )?.ppap_documents?.individual?.Drawing?.trim();
+const individual = (product as any)?.ppap_documents?.individual;
+
+const hasDrawing = Object.entries(individual || {}).find(
+  ([key, value]) =>
+    key.toLowerCase() === "drawing" &&
+    typeof value === "string" &&
+    value.trim()
+)?.[1];
                       const isNoDrawing = !hasDrawing;
 
                       return (
