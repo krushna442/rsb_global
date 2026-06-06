@@ -30,6 +30,7 @@ interface PlanRow {
   target: number;
   total_qty: number;
   previous_diff?: number;
+  employee_count?: number;
   is_synthetic?: boolean;
 }
 
@@ -60,6 +61,7 @@ function getCurrentPlanDate(): string {
 export default function BearingCupPlanPage() {
   const { user } = useUser();
   const canEdit = ["admin", "super admin", "production"].includes(user?.role || "");
+  const isAdmin = ["admin", "super admin"].includes(user?.role || "");
 
   const todayPlanDate = getCurrentPlanDate();
   const [date, setDate] = useState(todayPlanDate);
@@ -81,7 +83,7 @@ export default function BearingCupPlanPage() {
 
   // ── helpers ─────────────────────────────────────────────────────────────────
 const makeEmptyRow = (jt: string, type: "G" | "NG"): PlanRow => {
-  const r: PlanRow = { jt_type: jt, type, shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0 };
+  const r: PlanRow = { jt_type: jt, type, shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0, employee_count: 1 };
   for (let i = 3; i < numShifts; i++) r[`shift${i + 1}_qty`] = 0;
   return r;
 };
@@ -293,7 +295,7 @@ const addJtRow = () => {
 
     // Header
     const shiftHeaders = Array.from({ length: numShifts }, (_, i) => `Shift ${i + 1}`);
-    const header = ["JT Type", "Type", "Prev Diff", ...shiftHeaders, "Actual", "Total Target", "Diff"];
+    const header = ["JT Type", "Type", "Employees", ...shiftHeaders, "Actual", "Total Target", "Diff"];
     const sheetData: any[][] = [header];
 
     jtTypes.forEach((jt) => {
@@ -302,8 +304,8 @@ const addJtRow = () => {
       [gRow, ngRow].forEach((r) => {
         if (!r) return;
         const shiftVals = Array.from({ length: numShifts }, (_, i) => Number(r[shiftKey(i)]) || 0);
-        const diff = r.target - r.total_qty; // Actual - Total Target
-        sheetData.push([r.jt_type, r.type, r.previous_diff || 0, ...shiftVals, r.target, r.total_qty, diff]);
+        const diff = r.target - r.total_qty;
+        sheetData.push([r.jt_type, r.type, r.employee_count || 1, ...shiftVals, r.target, r.total_qty, diff]);
       });
     });
 
@@ -539,7 +541,8 @@ const addJtRow = () => {
                   <tr className="bg-slate-100/80 border-b">
                     <th className="px-4 py-3 font-semibold text-slate-700 text-left w-48">JT Type</th>
                     <th className="px-4 py-3 font-semibold text-slate-700 w-16 border-x">Type</th>
-                    <th className="px-3 py-3 font-semibold text-slate-700 min-w-[70px]">Prev Diff</th>
+                    {isAdmin && <th className="px-3 py-3 font-semibold text-slate-700 min-w-[70px]">Prev Diff</th>}
+                    <th className="px-3 py-3 font-semibold text-slate-700 min-w-[80px]">Employees</th>
                     {Array.from({ length: numShifts }).map((_, i) => (
                       <th key={i} className="px-4 py-3 font-semibold text-slate-700 min-w-[130px]">
                         Shift {i + 1}
@@ -580,11 +583,35 @@ const addJtRow = () => {
                               )}
                             </td>
                             <td className="px-4 py-2 border-r font-medium text-emerald-600 bg-emerald-50/30">G</td>
-                            <td className="px-3 py-1.5">
-                              {gRow.previous_diff !== 0 && (
-                                <span className={`text-xs font-bold ${gRow.previous_diff! > 0 ? "text-blue-600" : "text-red-600"}`}>
-                                  {gRow.previous_diff! > 0 ? `+${gRow.previous_diff}` : gRow.previous_diff}
-                                </span>
+                            {isAdmin && (
+                              <td className="px-3 py-1.5">
+                                {gRow.previous_diff !== 0 && (
+                                  <span className={`text-xs font-bold ${gRow.previous_diff! > 0 ? "text-blue-600" : "text-red-600"}`}>
+                                    {gRow.previous_diff! > 0 ? `+${gRow.previous_diff}` : gRow.previous_diff}
+                                  </span>
+                                )}
+                              </td>
+                            )}
+                            {/* Employee count — only editable in edit mode for G row */}
+                            <td className="px-2 py-1.5">
+                              {isFormEditable ? (
+                                <select
+                                  value={gRow.employee_count || 1}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value);
+                                    // Update both G and NG rows for this JT type
+                                    setRows(prev => prev.map(r =>
+                                      r.jt_type === jt ? { ...r, employee_count: val } : r
+                                    ));
+                                  }}
+                                  className="h-8 text-xs border rounded px-1 py-1 bg-background w-16 text-center"
+                                >
+                                  {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                                    <option key={n} value={n}>{n}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span className="font-semibold text-slate-700 text-sm">{gRow.employee_count || 1}</span>
                               )}
                             </td>
                             {Array.from({ length: numShifts }).map((_, i) => (
@@ -631,12 +658,18 @@ const addJtRow = () => {
                               <span className="font-medium text-slate-400">{jt}</span>
                             </td>
                             <td className="px-4 py-2 border-r border-b font-medium text-rose-600 bg-rose-50/30">NG</td>
-                            <td className="px-3 py-1.5 border-b">
-                              {ngRow.previous_diff !== 0 && (
-                                <span className={`text-xs font-bold ${ngRow.previous_diff! > 0 ? "text-blue-600" : "text-red-600"}`}>
-                                  {ngRow.previous_diff! > 0 ? `+${ngRow.previous_diff}` : ngRow.previous_diff}
-                                </span>
-                              )}
+                            {isAdmin && (
+                              <td className="px-3 py-1.5 border-b">
+                                {ngRow.previous_diff !== 0 && (
+                                  <span className={`text-xs font-bold ${ngRow.previous_diff! > 0 ? "text-blue-600" : "text-red-600"}`}>
+                                    {ngRow.previous_diff! > 0 ? `+${ngRow.previous_diff}` : ngRow.previous_diff}
+                                  </span>
+                                )}
+                              </td>
+                            )}
+                            {/* Employee count cell for NG row — mirrors G row's count, read-only */}
+                            <td className="px-2 py-1.5 border-b">
+                              <span className="font-semibold text-slate-500 text-sm">{gRow?.employee_count || ngRow.employee_count || 1}</span>
                             </td>
                             {Array.from({ length: numShifts }).map((_, i) => (
                               <td key={i} className="px-3 py-1.5 border-b">
@@ -675,7 +708,7 @@ const addJtRow = () => {
                 {/* Grand Total Footer */}
                 <tfoot className="bg-slate-800 text-white font-semibold">
                   <tr>
-                    <td colSpan={3} className="px-4 py-3 text-right uppercase tracking-wider text-xs border-r border-slate-700">Daily Grand Total</td>
+                    <td colSpan={isAdmin ? 4 : 3} className="px-4 py-3 text-right uppercase tracking-wider text-xs border-r border-slate-700">Daily Grand Total</td>
                     {Array.from({ length: numShifts }).map((_, i) => (
                       <td key={i} className="px-4 py-3">{totals[`s${i + 1}`]}</td>
                     ))}
@@ -767,7 +800,32 @@ function GraphsTab() {
     finally { setJtLoading(false); }
   };
 
-  useEffect(() => { loadGraph(); loadJtSummary(today, today); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // ── Monthly cumulative table section ──────────────────────────────────────────
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1; // 1-based
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
+  // byDate: { "2026-06-01": { "JT_TYPE_1": { G: 10, NG: 2 }, ... }, ... }
+  const [monthlyByDate, setMonthlyByDate] = useState<Record<string, Record<string, { G: number; NG: number }>>>({});
+  const [monthlyJtTypes, setMonthlyJtTypes] = useState<string[]>([]);
+
+  const loadMonthly = async () => {
+    setMonthlyLoading(true);
+    try {
+      const firstDay = `${currentYear}-${String(currentMonth).padStart(2, "0")}-01`;
+      const lastDay = new Date(currentYear, currentMonth, 0).toISOString().slice(0, 10);
+      const res = await api.get(`/bearing-cup-plans/jt-summary?from=${firstDay}&to=${lastDay}`);
+      setMonthlyByDate(res.data.byDate || {});
+      // Collect all unique JT types
+      const jtSet = new Set<string>();
+      Object.values(res.data.byDate || {}).forEach((dayData: any) => {
+        Object.keys(dayData).forEach(jt => jtSet.add(jt));
+      });
+      setMonthlyJtTypes(Array.from(jtSet).sort());
+    } catch { toast.error("Failed to load monthly data"); }
+    finally { setMonthlyLoading(false); }
+  };
+
+  useEffect(() => { loadGraph(); loadJtSummary(today, today); loadMonthly(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const jtStats = useMemo(() => {
     const map: Record<string, { jt_type: string; target: number; actual: number }> = {};
@@ -827,6 +885,60 @@ function GraphsTab() {
   const jtGrandTotal = { G: jtTotals.reduce((s,r)=>s+r.G,0), NG: jtTotals.reduce((s,r)=>s+r.NG,0), total: jtTotals.reduce((s,r)=>s+r.total,0) };
   const isSingleDay = jtFrom === jtTo;
 
+  const exportMonthlyExcel = () => {
+    if (Object.keys(monthlyByDate).length === 0) return toast.error("No monthly data to export");
+    const wb = XLSX.utils.book_new();
+    const sortedDates = Object.keys(monthlyByDate).sort();
+    const allJtTypes = monthlyJtTypes;
+
+    // Header row: Date | JT1 (G) | JT1 (NG) | JT1 Total | ... | Day Total
+    const header: any[] = ["Date"];
+    allJtTypes.forEach(jt => {
+      header.push(`${jt} (G)`, `${jt} (NG)`, `${jt} Total`);
+    });
+    header.push("Day Total");
+
+    const sheetData: any[][] = [header];
+
+    // Column totals
+    const colTotalsG: Record<string, number> = {};
+    const colTotalsNG: Record<string, number> = {};
+    allJtTypes.forEach(jt => { colTotalsG[jt] = 0; colTotalsNG[jt] = 0; });
+    let grandTotal = 0;
+
+    sortedDates.forEach(d => {
+      const row: any[] = [new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })];
+      let dayTotal = 0;
+      allJtTypes.forEach(jt => {
+        const v = monthlyByDate[d]?.[jt];
+        const g = v?.G || 0;
+        const ng = v?.NG || 0;
+        row.push(g, ng, g + ng);
+        colTotalsG[jt] += g;
+        colTotalsNG[jt] += ng;
+        dayTotal += g + ng;
+      });
+      row.push(dayTotal);
+      grandTotal += dayTotal;
+      sheetData.push(row);
+    });
+
+    // Totals row
+    const totalsRow: any[] = ["MONTH TOTAL"];
+    allJtTypes.forEach(jt => {
+      totalsRow.push(colTotalsG[jt], colTotalsNG[jt], colTotalsG[jt] + colTotalsNG[jt]);
+    });
+    totalsRow.push(grandTotal);
+    sheetData.push(totalsRow);
+
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+    ws["!cols"] = [{ wch: 16 }, ...allJtTypes.flatMap(() => [{ wch: 8 }, { wch: 8 }, { wch: 10 }]), { wch: 12 }];
+    const monthLabel = new Date(currentYear, currentMonth - 1).toLocaleString("en-IN", { month: "short", year: "numeric" });
+    XLSX.utils.book_append_sheet(wb, ws, monthLabel);
+    XLSX.writeFile(wb, `monthly_production_${currentYear}_${String(currentMonth).padStart(2, "0")}.xlsx`);
+    toast.success("Monthly Excel exported");
+  };
+
   return (
     <div className="space-y-6">
       {/* ── Date range for bar chart ── */}
@@ -844,6 +956,7 @@ function GraphsTab() {
           Load Graph
         </Button>
       </div>
+
 
       {/* ── Bar chart ── */}
       <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
@@ -992,6 +1105,114 @@ function GraphsTab() {
             </div>
           </>
         )}
+      </div>
+
+      {/* ── Monthly Cumulative Production Table ── */}
+      <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
+        <div className="px-5 py-3.5 bg-gradient-to-r from-teal-700 to-teal-500 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-white text-sm">Monthly Production Summary — {new Date(currentYear, currentMonth - 1).toLocaleString("en-IN", { month: "long", year: "numeric" })}</h3>
+            <p className="text-teal-200 text-xs mt-0.5">Each day&apos;s production count by JT type (G + NG)</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportMonthlyExcel}
+              disabled={monthlyLoading || Object.keys(monthlyByDate).length === 0}
+              className="flex items-center gap-1.5 bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-md hover:bg-emerald-600 transition-colors disabled:opacity-50"
+            >
+              <FileSpreadsheet className="w-3 h-3" /> Export Excel
+            </button>
+            <button
+              onClick={loadMonthly}
+              disabled={monthlyLoading}
+              className="flex items-center gap-1.5 bg-white text-teal-700 text-xs font-semibold px-3 py-1.5 rounded-md hover:bg-teal-50 transition-colors disabled:opacity-60"
+            >
+              {monthlyLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <BarChart2 className="w-3 h-3" />}
+              Refresh
+            </button>
+          </div>
+        </div>
+
+
+        {monthlyLoading ? (
+          <div className="flex justify-center items-center py-12 text-muted-foreground gap-2">
+            <Loader2 className="w-5 h-5 animate-spin" /> Loading monthly data...
+          </div>
+        ) : Object.keys(monthlyByDate).length === 0 ? (
+          <div className="text-center py-12 text-sm text-muted-foreground">No data for this month yet.</div>
+        ) : (() => {
+          const sortedDates = Object.keys(monthlyByDate).sort();
+          // Row totals per date
+          const dateTotals: Record<string, number> = {};
+          sortedDates.forEach(d => {
+            dateTotals[d] = monthlyJtTypes.reduce((sum, jt) => {
+              const v = monthlyByDate[d]?.[jt];
+              return sum + (v ? (v.G || 0) + (v.NG || 0) : 0);
+            }, 0);
+          });
+          // Column totals per JT
+          const jtColTotals: Record<string, number> = {};
+          monthlyJtTypes.forEach(jt => {
+            jtColTotals[jt] = sortedDates.reduce((sum, d) => {
+              const v = monthlyByDate[d]?.[jt];
+              return sum + (v ? (v.G || 0) + (v.NG || 0) : 0);
+            }, 0);
+          });
+          const grandTotal = Object.values(dateTotals).reduce((s, v) => s + v, 0);
+
+          return (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-center border-collapse">
+                <thead className="bg-teal-50 border-b border-teal-100 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 whitespace-nowrap min-w-[110px] border-r border-teal-100">Date</th>
+                    {monthlyJtTypes.map(jt => (
+                      <th key={jt} className="px-3 py-3 font-semibold text-teal-800 whitespace-nowrap min-w-[90px]">{jt}</th>
+                    ))}
+                    <th className="px-4 py-3 font-bold text-slate-800 whitespace-nowrap border-l border-teal-100">Day Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {sortedDates.map((d, rowIdx) => (
+                    <tr key={d} className={rowIdx % 2 === 0 ? "bg-white" : "bg-slate-50/40"}>
+                      <td className="px-4 py-2.5 text-left font-semibold text-slate-700 whitespace-nowrap border-r border-slate-100">
+                        {new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                      </td>
+                      {monthlyJtTypes.map(jt => {
+                        const v = monthlyByDate[d]?.[jt];
+                        const total = v ? (v.G || 0) + (v.NG || 0) : 0;
+                        return (
+                          <td key={jt} className="px-3 py-2.5">
+                            {total > 0 ? (
+                              <span className="inline-flex flex-col items-center">
+                                <span className="font-bold text-teal-700 text-sm">{total}</span>
+                                <span className="text-[9px] text-slate-400">{v?.G || 0}G / {v?.NG || 0}NG</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td className="px-4 py-2.5 font-bold text-slate-800 border-l border-slate-100">
+                        {dateTotals[d] > 0 ? dateTotals[d] : <span className="text-slate-300">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-slate-800 text-white font-bold">
+                  <tr>
+                    <td className="px-4 py-3 text-left text-xs uppercase tracking-wide border-r border-slate-700">Month Total</td>
+                    {monthlyJtTypes.map(jt => (
+                      <td key={jt} className="px-3 py-3 text-teal-300">{jtColTotals[jt] || 0}</td>
+                    ))}
+                    <td className="px-4 py-3 text-lg text-emerald-300 border-l border-slate-700">{grandTotal}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

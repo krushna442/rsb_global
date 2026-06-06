@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
 import { useSocket } from "@/hooks/useSocket";
+import { useProducts } from "@/contexts/ProductsContext";
 import { Loader2, Calendar as CalendarIcon, Save, Plus, Minus, Download, FileSpreadsheet } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -22,6 +23,7 @@ interface RecordRow {
   hour_slot: number;
   part_type: "front" | "rear" | "ia";
   tube_length: string;
+  part_number: string;
   quantity: number;
   remarks: string;
   isNew?: boolean;
@@ -52,7 +54,8 @@ const partConfig = [
 ];
 
 const subCols = [
-  { key: "tube_length", label: "Tube Length", width: "min-w-[130px]" },
+  { key: "part_number",  label: "Part No",     width: "min-w-[130px]" },
+  { key: "tube_length",  label: "Tube Length",  width: "min-w-[130px]" },
   { key: "quantity",    label: "Quantity",    width: "min-w-[90px]"  },
   { key: "remarks",     label: "Remarks",     width: "min-w-[160px]" },
 ];
@@ -108,10 +111,70 @@ function exportTubeLengthExcel(
 
 export default function HourlyProductionPage() {
   const { user } = useUser();
+  const { products } = useProducts();
   // All roles can enter values; viewers have time-based slot restrictions
   const canEdit = true;
   const isAdmin  = ["admin", "super admin"].includes(user?.role || "");
   const isViewer = user?.role === "viewer";
+
+  // Build a map: tubeLength -> [partNumber, ...] from product context (no extra API call)
+  const tubeLengthMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    products.forEach(p => {
+      const tl = (p.specification?.tubeLength || "").trim();
+      if (!tl) return;
+      const pn = (p.part_number || "").trim();
+      if (!pn) return;
+      if (!map.has(tl)) map.set(tl, []);
+      if (!map.get(tl)!.includes(pn)) map.get(tl)!.push(pn);
+    });
+    return map;
+  }, [products]);
+
+  // Build reverse map: partNumber -> tubeLength
+  const partToTubeLength = useMemo(() => {
+    const map = new Map<string, string>();
+    products.forEach(p => {
+      const tl = (p.specification?.tubeLength || "").trim();
+      const pn = (p.part_number || "").trim();
+      if (tl && pn) map.set(pn, tl);
+    });
+    return map;
+  }, [products]);
+
+  // Debounce timeout refs for tube length typing
+  const tubeLengthTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
+
+  const handleTubeLengthChange = (hour: number, ptKey: "front" | "rear" | "ia", idx: number, val: string) => {
+    handleUpdate(hour, ptKey, idx, "tube_length", val);
+    
+    const key = `${hour}-${ptKey}-${idx}`;
+    if (tubeLengthTimeoutRef.current[key]) {
+      clearTimeout(tubeLengthTimeoutRef.current[key]);
+    }
+    
+    tubeLengthTimeoutRef.current[key] = setTimeout(() => {
+      const parts = tubeLengthMap.get(val.trim()) || [];
+      if (parts.length === 1) {
+        // Find current records to check if part_number is already set to the same value
+        setRecords(prev => {
+          const filtered = prev.filter(r => r.hour_slot === hour && r.part_type === ptKey);
+          if (idx < filtered.length) {
+            const mainIdx = prev.indexOf(filtered[idx]);
+            if (mainIdx >= 0 && prev[mainIdx].part_number !== parts[0]) {
+              const copy = [...prev];
+              copy[mainIdx] = { ...copy[mainIdx], part_number: parts[0] };
+              toast.success(`Auto-filled Part No: ${parts[0]}`);
+              return copy;
+            }
+          }
+          return prev;
+        });
+      } else if (parts.length > 1) {
+        toast.info(`Found ${parts.length} part numbers. Please select from the Part No dropdown.`);
+      }
+    }, 600); // 600ms debounce
+  };
 
   // ── active tab ───────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"daily" | "cumulative">("daily");
@@ -120,17 +183,10 @@ export default function HourlyProductionPage() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [deletedIds, setDeletedIds] = useState<number[]>([]);
 
-  const recordsRef = React.useRef(records);
-  const deletedIdsRef = React.useRef(deletedIds);
-  React.useEffect(() => { recordsRef.current = records; }, [records]);
-  React.useEffect(() => { deletedIdsRef.current = deletedIds; }, [deletedIds]);
-  const debounceTimer = React.useRef<NodeJS.Timeout | null>(null);
-
-  // ── current hour tracker ──────────────────────────────────────────────────────
+  // ── current hour tracker (used for viewer slot restrictions) ─────────────────
   const [currentHour, setCurrentHour] = useState(() => {
     const now = new Date();
     let h = now.getHours();
@@ -146,7 +202,7 @@ export default function HourlyProductionPage() {
         if (prev !== computedH) return computedH;
         return prev;
       });
-    }, 60000); // Check every minute
+    }, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -175,11 +231,7 @@ export default function HourlyProductionPage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => {
-    if (!debounceTimer.current) {
-      loadDaily(date);
-    }
-  }, [date, currentHour, loadDaily]);
+  useEffect(() => { loadDaily(date); }, [date, loadDaily]);
 
   const loadSummary = useCallback(async (ym: string) => {
     const [year, month] = ym.split("-");
@@ -212,50 +264,12 @@ export default function HourlyProductionPage() {
     }
   }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── auto save logic ───────────────────────────────────────────────────────────
-  const scheduleAutoSave = useCallback(() => {
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(async () => {
-      debounceTimer.current = null;
-      setIsAutoSaving(true);
-      try {
-        const currentDeleted = [...deletedIdsRef.current];
-        const currentRecords = [...recordsRef.current];
-        
-        for (const id of currentDeleted) await api.delete(`/hourly-production/${id}`);
-        setDeletedIds(prev => prev.filter(id => !currentDeleted.includes(id)));
-        
-        let requiresReload = currentDeleted.length > 0;
-        
-        for (const r of currentRecords) {
-          if (r.isNew) {
-            if (r.tube_length || r.quantity > 0 || r.remarks) {
-              await api.post("/hourly-production", { production_date: date, hour_slot: r.hour_slot, part_type: r.part_type, tube_length: r.tube_length, quantity: r.quantity, remarks: r.remarks });
-              requiresReload = true;
-            }
-          } else if (r.id) {
-            await api.put(`/hourly-production/${r.id}`, { tube_length: r.tube_length, quantity: r.quantity, remarks: r.remarks });
-          }
-        }
-        
-        if (requiresReload && !debounceTimer.current) {
-          loadDaily(date);
-          loadSummary(summaryMonth);
-        }
-      } catch {
-        console.error("Auto-save failed");
-      } finally {
-        setIsAutoSaving(false);
-      }
-    }, 1500);
-  }, [date, loadDaily, loadSummary, summaryMonth]);
-
   // ── daily helpers ─────────────────────────────────────────────────────────────
   const getRecords = useCallback(
     (hour_slot: number, part_type: "front" | "rear" | "ia"): RecordRow[] => {
       const filtered = records.filter((r) => r.hour_slot === hour_slot && r.part_type === part_type);
       if (filtered.length === 0) {
-        return [{ production_date: date, hour_slot, part_type, tube_length: "", quantity: 0, remarks: "", isNew: true }];
+        return [{ production_date: date, hour_slot, part_type, tube_length: "", part_number: "", quantity: 0, remarks: "", isNew: true }];
       }
       return filtered;
     },
@@ -281,13 +295,11 @@ export default function HourlyProductionPage() {
       }
       return prev;
     });
-    scheduleAutoSave();
   };
 
   const handleAddRow = (hour_slot: number, part_type: "front" | "rear" | "ia") => {
     if (!canEdit) return;
-    setRecords((prev) => [...prev, { production_date: date, hour_slot, part_type, tube_length: "", quantity: 0, remarks: "", isNew: true }]);
-    scheduleAutoSave();
+    setRecords((prev) => [...prev, { production_date: date, hour_slot, part_type, tube_length: "", part_number: "", quantity: 0, remarks: "", isNew: true }]);
   };
 
   const handleRemoveRow = (hour_slot: number, part_type: "front" | "rear" | "ia", index: number) => {
@@ -308,7 +320,6 @@ export default function HourlyProductionPage() {
       }
       return prev;
     });
-    scheduleAutoSave();
   };
 
   const handleSave = async () => {
@@ -317,11 +328,11 @@ export default function HourlyProductionPage() {
       for (const id of deletedIds) await api.delete(`/hourly-production/${id}`);
       for (const r of records) {
         if (r.isNew) {
-          if (r.tube_length || r.quantity > 0 || r.remarks) {
-            await api.post("/hourly-production", { production_date: date, hour_slot: r.hour_slot, part_type: r.part_type, tube_length: r.tube_length, quantity: r.quantity, remarks: r.remarks });
+          if (r.tube_length || r.part_number || r.quantity > 0 || r.remarks) {
+            await api.post("/hourly-production", { production_date: date, hour_slot: r.hour_slot, part_type: r.part_type, tube_length: r.tube_length, part_number: r.part_number, quantity: r.quantity, remarks: r.remarks });
           }
         } else if (r.id) {
-          await api.put(`/hourly-production/${r.id}`, { tube_length: r.tube_length, quantity: r.quantity, remarks: r.remarks });
+          await api.put(`/hourly-production/${r.id}`, { tube_length: r.tube_length, part_number: r.part_number, quantity: r.quantity, remarks: r.remarks });
         }
       }
       toast.success("Saved successfully");
@@ -426,19 +437,14 @@ export default function HourlyProductionPage() {
                   <CalendarIcon className="w-4 h-4 text-muted-foreground" />
                   <input type="date" className="text-sm border-none bg-transparent outline-none cursor-pointer" value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
-                <Button variant="outline" onClick={() => loadDaily(date)} disabled={loading || saving || isAutoSaving} className="gap-1.5 px-3">
+                <Button variant="outline" onClick={() => loadDaily(date)} disabled={loading || saving} className="gap-1.5 px-3">
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={loading ? "animate-spin" : ""}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                   Refresh
                 </Button>
-                <Button onClick={handleSave} disabled={loading || saving || isAutoSaving} className="gap-1.5">
+                <Button onClick={handleSave} disabled={loading || saving} className="gap-1.5">
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   Save Board
                 </Button>
-                {isAutoSaving && (
-                  <span className="text-xs font-semibold text-muted-foreground animate-pulse flex items-center gap-1.5 bg-slate-100 px-2 py-1.5 rounded-md">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Auto-saving...
-                  </span>
-                )}
               </>
             )}
           </div>
@@ -500,9 +506,43 @@ export default function HourlyProductionPage() {
                             const recs = getRecords(hour, pt.key);
                             return (
                               <React.Fragment key={pt.key}>
+                                {/* Part Number cell with tube-length based suggestions */}
+                                <td className={`px-2 py-1.5 border border-slate-200 ${pt.bg}/30`}>
+                                  {recs.map((rec, idx) => {
+                                    const suggestedParts = rec.tube_length
+                                      ? (tubeLengthMap.get(rec.tube_length.trim()) || [])
+                                      : [];
+                                    return (
+                                      <div key={idx} className="relative mb-1 last:mb-0">
+                                        <Input
+                                          value={rec.part_number || ""}
+                                          onChange={(e) => {
+                                            const pn = e.target.value;
+                                            handleUpdate(hour, pt.key, idx, "part_number", pn);
+                                            // Auto-fill tube length if this part has a known tube length
+                                            const tl = partToTubeLength.get(pn.trim());
+                                            if (tl) handleUpdate(hour, pt.key, idx, "tube_length", tl);
+                                          }}
+                                          disabled={!slotEditable}
+                                          className="h-8 text-xs w-full"
+                                          placeholder="Part No"
+                                          list={`pn-suggestions-${hour}-${pt.key}-${idx}`}
+                                        />
+                                        {suggestedParts.length > 0 && (
+                                          <datalist id={`pn-suggestions-${hour}-${pt.key}-${idx}`}>
+                                            {suggestedParts.map(pn => (
+                                              <option key={pn} value={pn} />
+                                            ))}
+                                          </datalist>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </td>
+                                {/* Tube Length cell */}
                                 <td className={`px-2 py-1.5 border border-slate-200 ${pt.bg}/30`}>
                                   {recs.map((rec, idx) => (
-                                    <Input key={idx} value={rec.tube_length} onChange={(e) => handleUpdate(hour, pt.key, idx, "tube_length", e.target.value)} disabled={!slotEditable} className="h-8 text-xs w-full mb-1 last:mb-0" placeholder="—" />
+                                    <Input key={idx} value={rec.tube_length} onChange={(e) => handleTubeLengthChange(hour, pt.key, idx, e.target.value)} disabled={!slotEditable} className="h-8 text-xs w-full mb-1 last:mb-0" placeholder="—" />
                                   ))}
                                 </td>
                                 <td className={`px-2 py-1.5 border border-slate-200 ${pt.bg}/30`}>
@@ -530,6 +570,7 @@ export default function HourlyProductionPage() {
                                   ))}
                                 </td>
                               </React.Fragment>
+
                             );
                           })}
                         </tr>

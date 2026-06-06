@@ -135,20 +135,34 @@ function PersonModal({ open, onClose, editPerson, machineId, onSaved }: {
   const [name, setName] = useState(""); const [dept, setDept] = useState(""); const [doj, setDoj] = useState("");
   const [level, setLevel] = useState(0); const [lastUpd, setLastUpd] = useState(""); const [auth, setAuth] = useState("");
   const [photo, setPhoto] = useState<File | null>(null); const [saving, setSaving] = useState(false);
+  const [removePhoto, setRemovePhoto] = useState(false);
   useEffect(() => {
     if (editPerson) { setName(editPerson.name); setDept(editPerson.department || ""); setDoj(editPerson.date_of_joining?.slice(0, 10) || ""); setLevel(editPerson.skill_level); setLastUpd(editPerson.last_skill_update_date?.slice(0, 10) || ""); setAuth(editPerson.authorised_for || ""); }
     else { setName(""); setDept("Production"); setDoj(""); setLevel(0); setLastUpd(new Date().toISOString().slice(0, 10)); setAuth(""); }
-    setPhoto(null);
+    setPhoto(null); setRemovePhoto(false);
   }, [editPerson, open]);
   const save = async () => {
     if (!name.trim()) return toast.error("Name required");
     setSaving(true);
     try {
-      const fd = new FormData();
-      fd.append("name", name); fd.append("department", dept); fd.append("date_of_joining", doj);
-      fd.append("skill_level", String(level)); fd.append("last_skill_update_date", lastUpd); fd.append("authorised_for", auth);
-      if (editPerson) { if (photo) fd.append("photo", photo); await api.put(`/skill-matrix/persons/${editPerson.id}`, fd, { headers: { "Content-Type": "multipart/form-data" } }); }
-      else { fd.append("machine_id", String(machineId)); if (photo) fd.append("photo", photo); await api.post("/skill-matrix/persons", fd, { headers: { "Content-Type": "multipart/form-data" } }); }
+      if (editPerson) {
+        // If user wants to remove photo, call remove endpoint first
+        if (removePhoto && editPerson.photo_path) {
+          await api.delete(`/skill-matrix/persons/${editPerson.id}/photo`);
+        }
+        const fd = new FormData();
+        fd.append("name", name); fd.append("department", dept); fd.append("date_of_joining", doj);
+        fd.append("skill_level", String(level)); fd.append("last_skill_update_date", lastUpd); fd.append("authorised_for", auth);
+        if (photo) fd.append("photo", photo);
+        await api.put(`/skill-matrix/persons/${editPerson.id}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      } else {
+        const fd = new FormData();
+        fd.append("name", name); fd.append("department", dept); fd.append("date_of_joining", doj);
+        fd.append("skill_level", String(level)); fd.append("last_skill_update_date", lastUpd); fd.append("authorised_for", auth);
+        fd.append("machine_id", String(machineId));
+        if (photo) fd.append("photo", photo);
+        await api.post("/skill-matrix/persons", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      }
       toast.success(editPerson ? "Updated" : "Added"); onSaved(); onClose();
     } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); } finally { setSaving(false); }
   };
@@ -181,7 +195,28 @@ function PersonModal({ open, onClose, editPerson, machineId, onSaved }: {
             </div>
           </div>
           <div><label className="text-xs font-semibold text-muted-foreground">Authorised for Other Machines</label><Input value={auth} onChange={e => setAuth(e.target.value)} placeholder="e.g. Painting, PDI, Phosphating" className="mt-1" /></div>
-          <div><label className="text-xs font-semibold text-muted-foreground">Photo</label><input type="file" accept="image/*" onChange={e => setPhoto(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground">Photo <span className="font-normal text-muted-foreground/70">(optional)</span></label>
+            {editPerson?.photo_path && !removePhoto && !photo && (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-xs text-slate-500">Current photo attached</span>
+                <button
+                  type="button"
+                  onClick={() => setRemovePhoto(true)}
+                  className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50"
+                >
+                  <X className="w-3 h-3" /> Remove Photo
+                </button>
+              </div>
+            )}
+            {removePhoto && (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-xs text-red-500">Photo will be removed on save</span>
+                <button type="button" onClick={() => setRemovePhoto(false)} className="text-xs text-slate-500 underline">Undo</button>
+              </div>
+            )}
+            <input type="file" accept="image/*" onChange={e => setPhoto(e.target.files?.[0] || null)} className="mt-1 block text-sm" />
+          </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
             <Button onClick={save} disabled={saving}>{saving && <Loader2 className="w-4 h-4 animate-spin mr-1" />}{editPerson ? "Save" : "Add"}</Button>
