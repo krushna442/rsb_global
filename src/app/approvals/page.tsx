@@ -228,12 +228,13 @@ const allFields = [
                 </div>
 
                 {/* Tabs */}
-                <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "pending" | "approved" | "rejected")} className="space-y-4">
+                <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "pending" | "approved" | "rejected")} className="space-y-4 ">
                     <TabsList className="bg-muted/50 h-9">
                         <TabsTrigger value="pending" className="text-xs data-[state=active]:shadow-sm">Pending</TabsTrigger>
                         <TabsTrigger value="approved" className="text-xs data-[state=active]:shadow-sm">Approved</TabsTrigger>
                         <TabsTrigger value="rejected" className="text-xs data-[state=active]:shadow-sm">Rejected</TabsTrigger>
                     </TabsList>
+               
 
                     {(["pending", "approved", "rejected"] as const).map((status) => {
                         const filtered = productsWithDrawing.filter(p => {

@@ -81,6 +81,9 @@ export default function BearingCupPlanPage() {
   const [importOpen, setImportOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Daily global employee count (applies to all JT rows for the day)
+  const [employeeCount, setEmployeeCount] = useState(1);
+
   // ── helpers ─────────────────────────────────────────────────────────────────
 const makeEmptyRow = (jt: string, type: "G" | "NG"): PlanRow => {
   const r: PlanRow = { jt_type: jt, type, shift1_qty: 0, shift2_qty: 0, shift3_qty: 0, target: 0, total_qty: 0, previous_diff: 0, employee_count: 1 };
@@ -115,6 +118,10 @@ const makeEmptyRow = (jt: string, type: "G" | "NG"): PlanRow => {
 
       setNumShifts(inferredShifts);
       setRows(loaded);
+
+      // Extract the daily employee count from the first real row that has one
+      const firstWithCount = loaded.find(r => !r.is_synthetic && r.employee_count != null);
+      setEmployeeCount(firstWithCount ? (Number(firstWithCount.employee_count) || 1) : 1);
       
       // If it only has synthetic rows (carry overs), we shouldn't lock it as an existing plan
       const hasRealData = loaded.some(r => !r.is_synthetic);
@@ -224,7 +231,9 @@ const addJtRow = () => {
   }
     setSaving(true);
     try {
-      await api.put("/bearing-cup-plans", { date, rows });
+      // Stamp the daily employee count on every row before sending to backend
+      const rowsWithCount = rows.map(r => ({ ...r, employee_count: employeeCount }));
+      await api.put("/bearing-cup-plans", { date, rows: rowsWithCount });
       toast.success("Plan saved successfully");
       setIsEditing(false);
       loadPlan(date);
@@ -293,10 +302,13 @@ const addJtRow = () => {
     if (!rows.length) return toast.error("No data to export");
     const wb = XLSX.utils.book_new();
 
-    // Header
+    // Header — global employee count is shown in a header info row, not per-JT column
     const shiftHeaders = Array.from({ length: numShifts }, (_, i) => `Shift ${i + 1}`);
-    const header = ["JT Type", "Type", "Employees", ...shiftHeaders, "Actual", "Total Target", "Diff"];
-    const sheetData: any[][] = [header];
+    const header = ["JT Type", "Type", ...shiftHeaders, "Actual", "Total Target", "Diff"];
+    const sheetData: any[][] = [
+      [`Bearing Cup Plan — ${date}   |   Employees on Duty: ${employeeCount}`],
+      header,
+    ];
 
     jtTypes.forEach((jt) => {
       const gRow = rows.find(r => r.jt_type === jt && r.type === "G");
@@ -305,16 +317,16 @@ const addJtRow = () => {
         if (!r) return;
         const shiftVals = Array.from({ length: numShifts }, (_, i) => Number(r[shiftKey(i)]) || 0);
         const diff = r.target - r.total_qty;
-        sheetData.push([r.jt_type, r.type, r.employee_count || 1, ...shiftVals, r.target, r.total_qty, diff]);
+        sheetData.push([r.jt_type, r.type, ...shiftVals, r.target, r.total_qty, diff]);
       });
     });
 
     // Totals row
     const shiftTotals = Array.from({ length: numShifts }, (_, i) => totals[`s${i + 1}`]);
-    sheetData.push(["TOTAL", "", "", ...shiftTotals, totals.target, totals.total, totals.target - totals.total]);
+    sheetData.push(["TOTAL", "", ...shiftTotals, totals.target, totals.total, totals.target - totals.total]);
 
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
-    ws["!cols"] = [{ wch: 14 }, { wch: 6 }, { wch: 10 }, ...shiftHeaders.map(() => ({ wch: 10 })), { wch: 10 }, { wch: 13 }, { wch: 8 }];
+    ws["!cols"] = [{ wch: 14 }, { wch: 6 }, ...shiftHeaders.map(() => ({ wch: 10 })), { wch: 10 }, { wch: 13 }, { wch: 8 }];
     XLSX.utils.book_append_sheet(wb, ws, date);
     XLSX.writeFile(wb, `bearing_cup_plan_${date}.xlsx`);
     toast.success("Exported successfully");
@@ -434,6 +446,21 @@ const addJtRow = () => {
               />
             </div>
 
+            {/* Daily employee count — applies to all JT rows for the selected date */}
+            <div className="flex items-center gap-1.5 bg-white border rounded-md px-3 h-9 shadow-sm">
+              <span className="text-xs text-muted-foreground font-medium whitespace-nowrap">👷 Employees:</span>
+              <select
+                value={employeeCount}
+                onChange={(e) => setEmployeeCount(parseInt(e.target.value))}
+                disabled={!isFormEditable}
+                className="text-sm border-none bg-transparent outline-none font-semibold text-slate-700 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Shift controls — hidden when plan exists unless editing */}
             {canEdit && isFormEditable && (
               <div className="flex items-center gap-1 border rounded-md overflow-hidden h-9">
@@ -542,7 +569,6 @@ const addJtRow = () => {
                     <th className="px-4 py-3 font-semibold text-slate-700 text-left w-48">JT Type</th>
                     <th className="px-4 py-3 font-semibold text-slate-700 w-16 border-x">Type</th>
                     {isAdmin && <th className="px-3 py-3 font-semibold text-slate-700 min-w-[70px]">Prev Diff</th>}
-                    <th className="px-3 py-3 font-semibold text-slate-700 min-w-[80px]">Employees</th>
                     {Array.from({ length: numShifts }).map((_, i) => (
                       <th key={i} className="px-4 py-3 font-semibold text-slate-700 min-w-[130px]">
                         Shift {i + 1}
@@ -592,28 +618,7 @@ const addJtRow = () => {
                                 )}
                               </td>
                             )}
-                            {/* Employee count — only editable in edit mode for G row */}
-                            <td className="px-2 py-1.5">
-                              {isFormEditable ? (
-                                <select
-                                  value={gRow.employee_count || 1}
-                                  onChange={(e) => {
-                                    const val = parseInt(e.target.value);
-                                    // Update both G and NG rows for this JT type
-                                    setRows(prev => prev.map(r =>
-                                      r.jt_type === jt ? { ...r, employee_count: val } : r
-                                    ));
-                                  }}
-                                  className="h-8 text-xs border rounded px-1 py-1 bg-background w-16 text-center"
-                                >
-                                  {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
-                                    <option key={n} value={n}>{n}</option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <span className="font-semibold text-slate-700 text-sm">{gRow.employee_count || 1}</span>
-                              )}
-                            </td>
+                            {/* Employee count is now a daily global value shown in the header — no per-row cell */}
                             {Array.from({ length: numShifts }).map((_, i) => (
                               <td key={i} className="px-3 py-1.5">
                                 {!isFormEditable ? (
@@ -667,10 +672,7 @@ const addJtRow = () => {
                                 )}
                               </td>
                             )}
-                            {/* Employee count cell for NG row — mirrors G row's count, read-only */}
-                            <td className="px-2 py-1.5 border-b">
-                              <span className="font-semibold text-slate-500 text-sm">{gRow?.employee_count || ngRow.employee_count || 1}</span>
-                            </td>
+                            {/* Employee count is now a daily global value shown in the header — no per-row cell */}
                             {Array.from({ length: numShifts }).map((_, i) => (
                               <td key={i} className="px-3 py-1.5 border-b">
                                 {!isFormEditable ? (

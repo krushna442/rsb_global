@@ -217,7 +217,7 @@ export function ProductForm({ isEdit = false, productId, initialData, isPopup = 
                     if (raw && (raw.individual || raw.ppap)) {
                         setExistingDocs({ ...(raw.individual || {}), ...(raw.ppap || {}) });
                         // Extract existing drawing URL
-                        const drawingPath = raw.individual?.Drawing || raw.ppap?.Drawing;
+                        const drawingPath = raw.individual?.Drawing || raw.ppap?.DRAWING;
                         if (drawingPath) {
                             setExistingDrawingUrl(getFileUrl(drawingPath));
                         }

@@ -5,8 +5,9 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useUser } from "@/contexts/UserContext";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import * as XLSX from "xlsx";
-// Install: npm install xlsx
+import * as XLSX from "xlsx-js-style";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -158,7 +159,7 @@ function generateObservationsForShift(
   obs.tubeLength = Array.from({ length: sampleCount }, () =>
     tubeBase ? randomVariant(tubeBase, 1) : "Ok"
   );
-  // totalFlange → ±2 variation (matches cron range=2); NO ×10 multiplier
+  // totalFlange → ±2 variation (matches cron range=2)
   obs.totalFlange = Array.from({ length: sampleCount }, () =>
     totalBase ? randomVariant(totalBase, 2) : "Ok"
   );
@@ -168,51 +169,107 @@ function generateObservationsForShift(
   while (obs.scannedText.length < sampleCount) obs.scannedText.push("Ok");
 
   // Grease
-  const grease = spec?.greaseableOrNonGreaseable?.toUpperCase().includes("NON")
-    ? "NON GREASABLE"
-    : "GREASABLE";
-  obs.grease = Array.from({ length: sampleCount }, () => grease);
+  const greaseVal = spec?.greaseableOrNonGreaseable || "NON GREASABLE";
+  obs.grease = Array.from({ length: sampleCount }, () => greaseVal);
 
   // Tube OD
-  const tubeOd = spec?.tubeDiameter ? `Ø${spec.tubeDiameter.replace("Ø", "")}` : "As per CP";
+  const tubeOd = spec?.tubeDiameter ? `Ø${spec.tubeDiameter.replace("Ø", "")}` : "As per control plan";
   obs.tubeOd = Array.from({ length: sampleCount }, () => tubeOd);
 
   // Deadener
   const deadener = spec?.availableNoiseDeadener?.toLowerCase() === "yes" ? "Yes" : "No";
   obs.deadener = Array.from({ length: sampleCount }, () => deadener);
 
+  // CB Kit (Type of Centre Bearing Kit)
+  const cbKit = spec?.cbKitDetails || "As per Control Plan";
+  obs.cbKit = Array.from({ length: sampleCount }, () => cbKit);
+
+  // Coupling Flange Orientations
+  const couplingOri = spec?.couplingFlangeOrientations || "90";
+  obs.couplingOrient = Array.from({ length: sampleCount }, () => couplingOri);
+
+  // Flange Yoke
+  const flangeYoke = spec?.mountingDetailsFlangeYoke || "As per control plan";
+  obs.flangeYoke = Array.from({ length: sampleCount }, () => flangeYoke);
+
+  // Coupling Flange
+  const couplingFlange = spec?.mountingDetailsCouplingFlange || "COUPLING YOKE";
+  obs.couplingFlange = Array.from({ length: sampleCount }, () => couplingFlange);
+
   // All visual checks → "Ok"
   const visualFields = [
-    "tubeLengthMatch", "slideJoint", "longFork", "couplingOrient",
-    "ujMovement", "circlip", "paint", "paintCondition", "antiRust",
-    "paintAdhesion", "welding", "balancingWeight", "greaseNipple",
-    "arrowMark", "rustFree", "drillHole", "pcd",
+    "tubeLengthMatch", "rotaryCbKit", "ujMovement", "circlip",
+    "paint", "paintCondition", "antiRust", "lockingChecknuts",
+    "paintAdhesion", "rustFree", "welding", "balancingWeight",
+    "greaseNipple", "mountingHoleDist", "drillHole", "pcd",
+    "slideJoint", "longFork",
   ];
   visualFields.forEach((f) => {
     obs[f] = Array.from({ length: sampleCount }, () => "Ok");
   });
 
-  // FRONT-specific
-  if (partType === "FRONT") {
-    obs.frontEndPiece = Array.from({ length: sampleCount }, () =>
-      spec?.frontEndPieceDetails || "As per CP"
-    );
-    obs.fepPressH = Array.from({ length: sampleCount }, () =>
-      spec?.fepPressHStockPositions || "As per CP"
-    );
-  }
-
-  // MIDDLE-specific
-  if (partType === "MIDDLE") {
-    obs.flangeYoke = Array.from({ length: sampleCount }, () =>
-      spec?.mountingDetailsFlangeYoke || "As per CP"
-    );
-    obs.couplingFlange = Array.from({ length: sampleCount }, () =>
-      spec?.mountingDetailsCouplingFlange || "As per CP"
-    );
-  }
-
   return obs;
+}
+
+function getPDIRows(partType: "FRONT" | "REAR" | "MIDDLE", obs: Record<string, (string | number)[]>, sampleCount: number) {
+  const allOk = "All Shaft Found of ok";
+  
+  if (partType === "REAR") {
+    return [
+      { sr: 1, char: "Tube Length", spec: "AS per control plan", mode: "Measuring Tape", vals: obs.tubeLength, status: allOk, remark: "Checked in process/poka yoke Control" },
+      { sr: 2, char: "Matching of Tube Length in QR Code Sticker & actual", spec: "Match tube length with QR Sticker", mode: "Visual", vals: obs.tubeLengthMatch, status: allOk, remark: "" },
+      { sr: 3, char: "QR Code Sticker Proper Scanning", spec: "Checked Part Number, Drawing Modification no and date", mode: "Barcode/ QR Code Scanner", vals: obs.scannedText, status: allOk, remark: "" },
+      { sr: 4, char: "Total Flange to Flange Length In Closed Condition (CLOSE LENGTH BATCH WISE 1PCS)", spec: "AS per control plan", mode: "Measuring Tape", vals: obs.totalFlange, status: allOk, remark: "Checked in process/poka yoke Control" },
+      { sr: 5, char: "To Maintain the Opening of Slide Joint for easy Fitment @ Customer end", spec: "As per requirement Match With visual alert", mode: "Visual/Gauge", vals: obs.slideJoint, status: allOk, remark: "" },
+      { sr: 6, char: "Long Fork Slide Movement (Smooth/Free)", spec: "Smooth Slide Movement", mode: "Hand Feel", vals: obs.longFork, status: allOk, remark: "" },
+      { sr: 7, char: "Position of Both End Eye Hole Centre Line.", spec: "Aligned (check Orientation OF Mounting Hole)", mode: "Visual", vals: obs.pcd, status: allOk, remark: "" },
+      { sr: 8, char: "UJ Movement (Smooth)", spec: "Proper And Equal Freeness", mode: "Hand Feel", vals: obs.ujMovement, status: allOk, remark: "" },
+      { sr: 9, char: "Circlip Seating/ Circlip Missing", spec: "No circlip missing, proper setting and no crack", mode: "Visual", vals: obs.circlip, status: allOk, remark: "" },
+      { sr: 10, char: "No paint missing at slip joint area, UJ Area", spec: "No paint missing at uj Area, No paint allow in slip joint, grease nipple, cb and uj area", mode: "Visual", vals: obs.paint, status: allOk, remark: "" },
+      { sr: 11, char: "Paint Condition", spec: "(No Run Down/Blisters/Patches)", mode: "Visual", vals: obs.paintCondition, status: allOk, remark: "" },
+      { sr: 12, char: "Anti Rust Oil @ Machining Area", spec: "No anti rust oil missing in machining Area", mode: "Visual", vals: obs.antiRust, status: allOk, remark: "" },
+      { sr: 13, char: "Proper Adhesion on Painted Surface (4B)", spec: "No Paint peel off Allow On Prop Shaft", mode: "Visual (As Per Standard)", vals: obs.paintAdhesion, status: allOk, remark: "" },
+      { sr: 14, char: "No Welding Defect", spec: "No Blow hole, porosity, spatter, under cut allow", mode: "Visual", vals: obs.welding, status: allOk, remark: "" },
+      { sr: 15, char: "Proper Seating of Balancing Weight Condition On Tube", spec: "Proper setting", mode: "Visual", vals: obs.balancingWeight, status: allOk, remark: "" },
+      { sr: 16, char: "Grease Nipple Condition & Status", spec: "No freeness and loose", mode: "Visual", vals: Array.from({ length: sampleCount }, () => "OK"), status: allOk, remark: "" },
+      { sr: 17, char: "Arrow Mark Punch", spec: "For Check Same plane", mode: "Visual", vals: obs.pcd, status: allOk, remark: "" },
+      { sr: 18, char: "Ensure Greasing at All Arms Of UJ", spec: "AS per control plan", mode: "Visual", vals: obs.grease, status: allOk, remark: "" },
+      { sr: 19, char: "Rust free", spec: "No Rust allow on prop shaft", mode: "Visual", vals: obs.rustFree, status: allOk, remark: "" },
+      { sr: 20, char: "Flange yoke Serration teeth (Ø180/Ø150/Ø120, 4-holes)", spec: "As per control plan", mode: "Mating Part", vals: obs.flangeYoke, status: allOk, remark: "As per control plan" },
+      { sr: 21, char: "PCD (Both Side) Drill Hole (4 nos)", spec: "AS per control plan", mode: "Checking Fixture/Round plug Gauge", vals: obs.drillHole, status: allOk, remark: "Incoming control (Checked on Sampling plan)" },
+      { sr: 22, char: "Tube OD", spec: "AS per control plan", mode: "Vernier/snap gauge", vals: obs.tubeOd, status: allOk, remark: "" },
+      { sr: 23, char: "Deadener available", spec: "AS per control plan", mode: "Sound detect", vals: obs.deadener, status: allOk, remark: "" },
+    ];
+  } else {
+    // FRONT and MIDDLE sheets share this list
+    return [
+      { sr: 1, char: "Tube Length", spec: "As per Control Plan", mode: "Measuring Tape", vals: obs.tubeLength, status: allOk, remark: "Checked in process/poka yoke Control" },
+      { sr: 2, char: "Matching of Tube Length in Bar Code /QR Code Sticker & actual", spec: "Match tube length with QR Sticker", mode: "Visual", vals: obs.tubeLengthMatch, status: allOk, remark: "" },
+      { sr: 3, char: "Bar Code / QR Code Sticker Proper Scanning", spec: "Checked Part Number, Drawing Modification no and date", mode: "Barcode/ QR Code Scanner", vals: obs.scannedText, status: allOk, remark: "" },
+      { sr: 4, char: "Total Flange to Flange Length In Closed Condition (CLOSE LENGTH BATCH WISE 1PCS)", spec: "As per Control Plan", mode: "Measuring Tape", vals: obs.totalFlange, status: allOk, remark: "Checked in process/poka yoke Control" },
+      { sr: 5, char: "Type of Centre Bearing Kit", spec: "As per Control Plan", mode: "Visual", vals: obs.cbKit, status: allOk, remark: "" },
+      { sr: 6, char: "Rotary Movement Of Centre Bearing Kit", spec: "No jamming of center Brg.Rotation", mode: "Hand Feel", vals: obs.rotaryCbKit, status: allOk, remark: "" },
+      { sr: 7, char: "Coupling Flange Orientations (As per QA Alert)", spec: "As per Control Plan (checked Mounting hole Orientatio)", mode: "Visual", vals: obs.couplingOrient, status: allOk, remark: "" },
+      { sr: 8, char: "UJ Movement (Smooth)", spec: "Proper And Equal Freeness", mode: "Hand Feel/ Torque gauge", vals: obs.ujMovement, status: allOk, remark: "" },
+      { sr: 9, char: "Circlip Seating/ Circlip Missing", spec: "No circlip missing, proper setting and no crack", mode: "Visual", vals: obs.circlip, status: allOk, remark: "" },
+      { sr: 10, char: "Paint Missing at Slip Area & UJ Area", spec: "No paint missing at uj Area, No paint allow in slip joint, grease nipple, and uj area", mode: "Visual", vals: obs.paint, status: allOk, remark: "" },
+      { sr: 11, char: "Paint Condition", spec: "(No Run Down/Blisters/Patches, No paint allow in center bearing Area)", mode: "Visual", vals: obs.paintCondition, status: allOk, remark: "" },
+      { sr: 12, char: "Anti Rust Oil @ Machining Area", spec: "No anti rust oil missing in machining Area", mode: "Visual", vals: obs.antiRust, status: allOk, remark: "" },
+      { sr: 13, char: "Locking of Cheknuts", spec: "Hex Nut lock by punching", mode: "Visual", vals: obs.lockingChecknuts, status: allOk, remark: "" },
+      { sr: 14, char: "Proper Adhesion on Painted Surface (4B)", spec: "No Paint peel off Allow On Prop Shaft", mode: "Visual (As Per Standard)", vals: obs.paintAdhesion, status: allOk, remark: "" },
+      { sr: 15, char: "Rust free", spec: "No Rust allow on prop shaft", mode: "Visual", vals: obs.rustFree, status: allOk, remark: "" },
+      { sr: 16, char: "No Welding Defect", spec: "No Blow hole, porosity, spatter, under cut allow", mode: "Visual", vals: obs.welding, status: allOk, remark: "" },
+      { sr: 17, char: "Proper Seating of Balancing Weight Condition On Tube", spec: "Proper setting", mode: "Visual Checked By hammer", vals: obs.balancingWeight, status: allOk, remark: "" },
+      { sr: 18, char: "Grease Nipple Condition & Status", spec: "No freeness and loose", mode: "Visual", vals: obs.grease, status: allOk, remark: "" },
+      { sr: 19, char: "Ensure Greasing at All Arms Of UJ", spec: "As per control plan", mode: "Visual", vals: obs.grease, status: allOk, remark: "" },
+      { sr: 20, char: "Mounting Hole Centre Distances", spec: "As per control plan", mode: "Vernier/ Checking Fixture", vals: obs.mountingHoleDist, status: allOk, remark: "As per control plan" },
+      { sr: 21, char: "Flange yoke Serration teeth (Ø180/Ø150/Ø120, 4-holes)", spec: "As per control plan", mode: "Mating Part", vals: obs.flangeYoke, status: allOk, remark: "As per control plan" },
+      { sr: 22, char: "PCD (Both Side) Drill Hole (4 nos)", spec: "As per control plan", mode: "Checking Fixture/Round plug Gauge", vals: obs.drillHole, status: allOk, remark: "Incoming control (Checked on Sampling plan)" },
+      { sr: 23, char: "PCD", spec: "As per control plan", mode: "Checking Fixture", vals: obs.pcd, status: allOk, remark: "Incoming control (Checked on Sampling plan)" },
+      { sr: 24, char: "Tube OD", spec: "As per control plan", mode: "Vernier /snap gauge", vals: obs.tubeOd, status: allOk, remark: "" },
+      { sr: 25, char: "Deadener available", spec: "As per control plan", mode: "Sound detect", vals: obs.deadener, status: allOk, remark: "" },
+    ];
+  }
 }
 
 // ─── Build XLSX for REAR ──────────────────────────────────────────────────────
@@ -236,7 +293,7 @@ function buildRearSheet(
     t: typeof v === "number" ? "n" : "s",
     s: {
       font: { name: "Arial", bold, color: { rgb: color } },
-      fill: bg ? { fgColor: { rgb: bg } } : undefined,
+      fill: bg ? { fgColor: { rgb: bg }, patternType: "solid" } : undefined,
       alignment: { horizontal: center ? "center" : "left", vertical: "center", wrapText: true },
       border: {
         top: { style: "thin", color: { rgb: "AAAAAA" } },
@@ -323,133 +380,7 @@ function buildRearSheet(
 
   // ── DATA ROWS ──────────────────────────────────────────────────────────────
 
-  const allOk = "All Shaft Found of ok";
-
-  const rows: Array<{
-    sr: number;
-    char: string;
-    spec: string;
-    mode: string;
-    vals: (string | number)[];
-    status: string;
-    remark: string;
-  }> = [
-    {
-      sr: 1, char: "Tube Length",
-      spec: "AS per control plan", mode: "Measuring Tape",
-      vals: obs.tubeLength, status: allOk, remark: "Checked in process/poka yoke Control",
-    },
-    {
-      sr: 2, char: "Matching of Tube Length in QR Code/Bar code Sticker & actual",
-      spec: "Match tube length with QR/BarCode Sticker", mode: "Visual",
-      vals: obs.tubeLengthMatch, status: allOk, remark: "",
-    },
-    {
-      sr: 3, char: "QR Code/ Bar Code Sticker Proper Scanning",
-      spec: "Checked Part Number, Drawing Modification no and date", mode: "Barcode/ QR Code Scanner",
-      vals: obs.scannedText, status: allOk, remark: "",
-    },
-    {
-      sr: 4, char: "Total Flange to Flange Length In Closed Condition (CLOSE LENGTH BATCH WISE 1PCS)",
-      spec: "AS per control plan", mode: "Measuring Tape",
-      vals: obs.totalFlange, status: allOk, remark: "Checked in process/poka yoke Control",
-    },
-    {
-      sr: 5, char: "To Maintain the Opening of Slide Joint for easy Fitment @ Customer end",
-      spec: "As per requirement Match With visual alert", mode: "Visual/Gauge",
-      vals: obs.slideJoint, status: allOk, remark: "",
-    },
-    {
-      sr: 6, char: "Long Fork Slide Movement (Smooth/Free)",
-      spec: "Smooth Slide Movement", mode: "Hand Feel",
-      vals: obs.longFork, status: allOk, remark: "",
-    },
-    {
-      sr: 7, char: "Coupling Flange Orientations (BOM DASHBOARD)",
-      spec: "Aligned (check Orientation OF Mounting Hole)", mode: "Visual",
-      vals: obs.couplingOrient, status: allOk, remark: "",
-    },
-    {
-      sr: 8, char: "UJ Movement (Smooth)",
-      spec: "Proper And Equal Freeness", mode: "Hand Feel",
-      vals: obs.ujMovement, status: allOk, remark: "",
-    },
-    {
-      sr: 9, char: "Circlip Seating/ Circlip Missing",
-      spec: "No circlip missing, proper setting and no crack", mode: "Visual",
-      vals: obs.circlip, status: allOk, remark: "",
-    },
-    {
-      sr: 10, char: "No paint missing at slip joint area, UJ Area",
-      spec: "No paint missing at uj Area, No paint allow in slip joint, grease nipple, cb and uj area",
-      mode: "Visual", vals: obs.paint, status: allOk, remark: "",
-    },
-    {
-      sr: 11, char: "Paint Condition",
-      spec: "(No Run Down/Blisters/Patches)", mode: "Visual",
-      vals: obs.paintCondition, status: allOk, remark: "",
-    },
-    {
-      sr: 12, char: "Anti Rust Oil @ Machining Area",
-      spec: "No anti rust oil missing in machining Area", mode: "Visual",
-      vals: obs.antiRust, status: allOk, remark: "",
-    },
-    {
-      sr: 13, char: "Proper Adhesion on Painted Surface (4B)",
-      spec: "No Paint peel off Allow On Prop Shaft", mode: "Visual (As Per Standard)",
-      vals: obs.paintAdhesion, status: allOk, remark: "",
-    },
-    {
-      sr: 14, char: "No Welding Defect",
-      spec: "No Blow hole, porosity, spatter, under cut allow", mode: "Visual",
-      vals: obs.welding, status: allOk, remark: "",
-    },
-    {
-      sr: 15, char: "Proper Seating of Balancing Weight Condition On Tube",
-      spec: "Proper setting", mode: "Visual",
-      vals: obs.balancingWeight, status: allOk, remark: "",
-    },
-    {
-      sr: 16, char: "Grease Nipple Condition & Status",
-      spec: "No freeness and loose", mode: "Visual",
-      vals: Array.from({ length: sampleCount }, () => "OK"), status: allOk, remark: "",
-    },
-    {
-      sr: 17, char: "Arrow Mark Punch",
-      spec: "For Check Same plane", mode: "Visual",
-      vals: obs.arrowMark, status: allOk, remark: "",
-    },
-    {
-      sr: 18, char: "Ensure Greasing at All Arms Of UJ",
-      spec: "AS per control plan", mode: "Visual",
-      vals: obs.grease, status: allOk, remark: "",
-    },
-    {
-      sr: 19, char: "Rust free",
-      spec: "No Rust allow on prop shaft", mode: "Visual",
-      vals: obs.rustFree, status: allOk, remark: "",
-    },
-    {
-      sr: 20, char: "Drill Hole (4 nos) (Both Side)",
-      spec: "AS per control plan", mode: "Checking Pin /Round plug Gauge",
-      vals: obs.drillHole, status: allOk, remark: "Incoming control (Checked on Sampling plan)",
-    },
-    {
-      sr: 21, char: "PCD (Both Side)",
-      spec: "AS per control plan", mode: "Checking Fixture",
-      vals: obs.pcd, status: allOk, remark: "Incoming control (Checked on Sampling plan)",
-    },
-    {
-      sr: 22, char: "Tube OD",
-      spec: "AS per control plan", mode: "Vernier/snap gauge",
-      vals: obs.tubeOd, status: allOk, remark: "",
-    },
-    {
-      sr: 23, char: "Deadener available",
-      spec: "AS per control plan", mode: "Sound detect",
-      vals: obs.deadener, status: allOk, remark: "",
-    },
-  ];
+  const rows = getPDIRows("REAR", obs, sampleCount);
 
   rows.forEach((row, idx) => {
     const excelRow = 8 + idx;
@@ -522,7 +453,7 @@ function buildFrontSheet(
     v, t: typeof v === "number" ? "n" : "s",
     s: {
       font: { name: "Arial", bold, color: { rgb: color } },
-      fill: bg ? { fgColor: { rgb: bg } } : undefined,
+      fill: bg ? { fgColor: { rgb: bg }, patternType: "solid" } : undefined,
       alignment: { horizontal: center ? "center" : "left", vertical: "center", wrapText: true },
       border: {
         top: { style: "thin", color: { rgb: "AAAAAA" } },
@@ -599,35 +530,7 @@ function buildFrontSheet(
   ws["K7"] = s("", true, headerBg, headerColor, true);
   ws["L7"] = s("", true, headerBg, headerColor, true);
 
-  const frontEndPiece = spec?.frontEndPieceDetails || "As per CP";
-
-  const rows = [
-    { sr: 1, char: "Tube Length", spec: "AS per control plan", mode: "Measuring Tape", vals: obs.tubeLength, status: allOk, remark: "Checked in process/poka yoke Control" },
-    { sr: 2, char: "Matching of Tube Length in QR Code/Bar code Sticker & actual", spec: "Match tube length with QR/BarCode Sticker", mode: "Visual", vals: obs.tubeLengthMatch, status: allOk, remark: "" },
-    { sr: 3, char: "QR Code/ Bar Code Sticker Proper Scanning", spec: "Checked Part Number, Drawing Modification no and date", mode: "Barcode/ QR Code Scanner", vals: obs.scannedText, status: allOk, remark: "" },
-    { sr: 4, char: "Total Flange to Flange Length In Closed Condition", spec: "AS per control plan", mode: "Measuring Tape", vals: obs.totalFlange, status: allOk, remark: "Checked in process/poka yoke Control" },
-    { sr: 5, char: "Front End Piece Details", spec: frontEndPiece, mode: "Visual", vals: Array.from({ length: sampleCount }, () => frontEndPiece), status: allOk, remark: "" },
-    { sr: 6, char: "FEP Press H Stock Positions", spec: spec?.fepPressHStockPositions || "As per CP", mode: "Visual/Gauge", vals: obs.fepPressH, status: allOk, remark: "" },
-    { sr: 7, char: "To Maintain the Opening of Slide Joint for easy Fitment", spec: "As per requirement", mode: "Visual/Gauge", vals: obs.slideJoint, status: allOk, remark: "" },
-    { sr: 8, char: "Long Fork Slide Movement (Smooth/Free)", spec: "Smooth Slide Movement", mode: "Hand Feel", vals: obs.longFork, status: allOk, remark: "" },
-    { sr: 9, char: "Coupling Flange Orientations (BOM DASHBOARD)", spec: "Aligned (check Orientation OF Mounting Hole)", mode: "Visual", vals: obs.couplingOrient, status: allOk, remark: "" },
-    { sr: 10, char: "UJ Movement (Smooth)", spec: "Proper And Equal Freeness", mode: "Hand Feel", vals: obs.ujMovement, status: allOk, remark: "" },
-    { sr: 11, char: "Circlip Seating/ Circlip Missing", spec: "No circlip missing, proper setting and no crack", mode: "Visual", vals: obs.circlip, status: allOk, remark: "" },
-    { sr: 12, char: "No paint missing at slip joint area, UJ Area", spec: "No paint allow in slip joint, grease nipple area", mode: "Visual", vals: obs.paint, status: allOk, remark: "" },
-    { sr: 13, char: "Paint Condition", spec: "(No Run Down/Blisters/Patches)", mode: "Visual", vals: obs.paintCondition, status: allOk, remark: "" },
-    { sr: 14, char: "Anti Rust Oil @ Machining Area", spec: "No anti rust oil missing in machining Area", mode: "Visual", vals: obs.antiRust, status: allOk, remark: "" },
-    { sr: 15, char: "Proper Adhesion on Painted Surface (4B)", spec: "No Paint peel off Allow On Prop Shaft", mode: "Visual (As Per Standard)", vals: obs.paintAdhesion, status: allOk, remark: "" },
-    { sr: 16, char: "No Welding Defect", spec: "No Blow hole, porosity, spatter, under cut allow", mode: "Visual", vals: obs.welding, status: allOk, remark: "" },
-    { sr: 17, char: "Proper Seating of Balancing Weight Condition On Tube", spec: "Proper setting", mode: "Visual", vals: obs.balancingWeight, status: allOk, remark: "" },
-    { sr: 18, char: "Grease Nipple Condition & Status", spec: "No freeness and loose", mode: "Visual", vals: Array.from({ length: sampleCount }, () => "OK"), status: allOk, remark: "" },
-    { sr: 19, char: "Arrow Mark Punch", spec: "For Check Same plane", mode: "Visual", vals: obs.arrowMark, status: allOk, remark: "" },
-    { sr: 20, char: "Ensure Greasing at All Arms Of UJ", spec: "AS per control plan", mode: "Visual", vals: obs.grease, status: allOk, remark: "" },
-    { sr: 21, char: "Rust free", spec: "No Rust allow on prop shaft", mode: "Visual", vals: obs.rustFree, status: allOk, remark: "" },
-    { sr: 22, char: "Drill Hole (4 nos) (Both Side)", spec: "AS per control plan", mode: "Checking Pin /Round plug Gauge", vals: obs.drillHole, status: allOk, remark: "Incoming control (Checked on Sampling plan)" },
-    { sr: 23, char: "PCD (Both Side)", spec: "AS per control plan", mode: "Checking Fixture", vals: obs.pcd, status: allOk, remark: "Incoming control (Checked on Sampling plan)" },
-    { sr: 24, char: "Tube OD", spec: "AS per control plan", mode: "Vernier/snap gauge", vals: obs.tubeOd, status: allOk, remark: "" },
-    { sr: 25, char: "Deadener available", spec: "AS per control plan", mode: "Sound detect", vals: obs.deadener, status: allOk, remark: "" },
-  ];
+  const rows = getPDIRows("FRONT", obs, sampleCount);
 
   rows.forEach((row, idx) => {
     const excelRow = 8 + idx;
@@ -692,7 +595,7 @@ function buildMiddleSheet(
     v, t: typeof v === "number" ? "n" : "s",
     s: {
       font: { name: "Arial", bold, color: { rgb: color } },
-      fill: bg ? { fgColor: { rgb: bg } } : undefined,
+      fill: bg ? { fgColor: { rgb: bg }, patternType: "solid" } : undefined,
       alignment: { horizontal: center ? "center" : "left", vertical: "center", wrapText: true },
       border: {
         top: { style: "thin", color: { rgb: "AAAAAA" } },
@@ -769,35 +672,32 @@ function buildMiddleSheet(
   ws["K7"] = s("", true, headerBg, headerColor, true);
   ws["L7"] = s("", true, headerBg, headerColor, true);
 
-  const flangeYoke = spec?.mountingDetailsFlangeYoke || "As per CP";
-  const couplingFlange = spec?.mountingDetailsCouplingFlange || "As per CP";
-
   const rows = [
-    { sr: 1, char: "Tube Length", spec: "AS per control plan", mode: "Measuring Tape", vals: obs.tubeLength, status: allOk, remark: "Checked in process/poka yoke Control" },
-    { sr: 2, char: "Matching of Tube Length in QR Code/Bar code Sticker & actual", spec: "Match tube length with QR/BarCode Sticker", mode: "Visual", vals: obs.tubeLengthMatch, status: allOk, remark: "" },
-    { sr: 3, char: "QR Code/ Bar Code Sticker Proper Scanning", spec: "Checked Part Number, Drawing Modification no and date", mode: "Barcode/ QR Code Scanner", vals: obs.scannedText, status: allOk, remark: "" },
-    { sr: 4, char: "Total Flange to Flange Length In Closed Condition", spec: "AS per control plan", mode: "Measuring Tape", vals: obs.totalFlange, status: allOk, remark: "Checked in process/poka yoke Control" },
-    { sr: 5, char: "Flange Yoke Details (Mounting)", spec: flangeYoke, mode: "Visual", vals: Array.from({ length: sampleCount }, () => flangeYoke), status: allOk, remark: "" },
-    { sr: 6, char: "Coupling Flange Details (Mounting)", spec: couplingFlange, mode: "Visual", vals: Array.from({ length: sampleCount }, () => couplingFlange), status: allOk, remark: "" },
-    { sr: 7, char: "To Maintain the Opening of Slide Joint for easy Fitment", spec: "As per requirement", mode: "Visual/Gauge", vals: obs.slideJoint, status: allOk, remark: "" },
-    { sr: 8, char: "Long Fork Slide Movement (Smooth/Free)", spec: "Smooth Slide Movement", mode: "Hand Feel", vals: obs.longFork, status: allOk, remark: "" },
-    { sr: 9, char: "Coupling Flange Orientations (BOM DASHBOARD)", spec: "Aligned (check Orientation OF Mounting Hole)", mode: "Visual", vals: obs.couplingOrient, status: allOk, remark: "" },
-    { sr: 10, char: "UJ Movement (Smooth)", spec: "Proper And Equal Freeness", mode: "Hand Feel", vals: obs.ujMovement, status: allOk, remark: "" },
-    { sr: 11, char: "Circlip Seating/ Circlip Missing", spec: "No circlip missing, proper setting and no crack", mode: "Visual", vals: obs.circlip, status: allOk, remark: "" },
-    { sr: 12, char: "No paint missing at slip joint area, UJ Area", spec: "No paint allow in slip joint, grease nipple area", mode: "Visual", vals: obs.paint, status: allOk, remark: "" },
-    { sr: 13, char: "Paint Condition", spec: "(No Run Down/Blisters/Patches)", mode: "Visual", vals: obs.paintCondition, status: allOk, remark: "" },
-    { sr: 14, char: "Anti Rust Oil @ Machining Area", spec: "No anti rust oil missing in machining Area", mode: "Visual", vals: obs.antiRust, status: allOk, remark: "" },
-    { sr: 15, char: "Proper Adhesion on Painted Surface (4B)", spec: "No Paint peel off Allow On Prop Shaft", mode: "Visual (As Per Standard)", vals: obs.paintAdhesion, status: allOk, remark: "" },
+    { sr: 1, char: "Tube Length", spec: "As per Control Plan", mode: "Measuring Tape", vals: obs.tubeLength, status: allOk, remark: "Checked in process/poka yoke Control" },
+    { sr: 2, char: "Matching of Tube Length in Bar Code /QR Code Sticker & actual", spec: "Match tube length with QR Sticker", mode: "Visual", vals: obs.tubeLengthMatch, status: allOk, remark: "" },
+    { sr: 3, char: "Bar Code / QR Code Sticker Proper Scanning", spec: "Checked Part Number, Drawing Modification no and date", mode: "Barcode/ QR Code Scanner", vals: obs.scannedText, status: allOk, remark: "" },
+    { sr: 4, char: "Total Flange to Flange Length In Closed Condition (CLOSE LENGTH BATCH WISE 1PCS)", spec: "As per Control Plan", mode: "Measuring Tape", vals: obs.totalFlange, status: allOk, remark: "Checked in process/poka yoke Control" },
+    { sr: 5, char: "Type of Centre Bearing Kit", spec: "As per Control Plan", mode: "Visual", vals: obs.cbKit, status: allOk, remark: "" },
+    { sr: 6, char: "Rotary Movement Of Centre Bearing Kit", spec: "No jamming of center Brg.Rotation", mode: "Hand Feel", vals: obs.rotaryCbKit, status: allOk, remark: "" },
+    { sr: 7, char: "Coupling Flange Orientations (As per QA Alert)", spec: "As per Control Plan (checked Mounting hole Orientatio)", mode: "Visual", vals: obs.couplingOrient, status: allOk, remark: "" },
+    { sr: 8, char: "UJ Movement (Smooth)", spec: "Proper And Equal Freeness", mode: "Hand Feel/ Torque gauge", vals: obs.ujMovement, status: allOk, remark: "" },
+    { sr: 9, char: "Circlip Seating/ Circlip Missing", spec: "No circlip missing, proper setting and no crack", mode: "Visual", vals: obs.circlip, status: allOk, remark: "" },
+    { sr: 10, char: "Paint Missing at Slip Area & UJ Area", spec: "No paint missing at uj Area, No paint allow in slip joint, grease nipple, and uj area", mode: "Visual", vals: obs.paint, status: allOk, remark: "" },
+    { sr: 11, char: "Paint Condition", spec: "(No Run Down/Blisters/Patches, No paint allow in center bearing Area)", mode: "Visual", vals: obs.paintCondition, status: allOk, remark: "" },
+    { sr: 12, char: "Anti Rust Oil @ Machining Area", spec: "No anti rust oil missing in machining Area", mode: "Visual", vals: obs.antiRust, status: allOk, remark: "" },
+    { sr: 13, char: "Locking of Cheknuts", spec: "Hex Nut lock by punching", mode: "Visual", vals: obs.lockingChecknuts, status: allOk, remark: "" },
+    { sr: 14, char: "Proper Adhesion on Painted Surface (4B)", spec: "No Paint peel off Allow On Prop Shaft", mode: "Visual (As Per Standard)", vals: obs.paintAdhesion, status: allOk, remark: "" },
+    { sr: 15, char: "Rust free", spec: "No Rust allow on prop shaft", mode: "Visual", vals: obs.rustFree, status: allOk, remark: "" },
     { sr: 16, char: "No Welding Defect", spec: "No Blow hole, porosity, spatter, under cut allow", mode: "Visual", vals: obs.welding, status: allOk, remark: "" },
-    { sr: 17, char: "Proper Seating of Balancing Weight Condition On Tube", spec: "Proper setting", mode: "Visual", vals: obs.balancingWeight, status: allOk, remark: "" },
-    { sr: 18, char: "Grease Nipple Condition & Status", spec: "No freeness and loose", mode: "Visual", vals: Array.from({ length: sampleCount }, () => "OK"), status: allOk, remark: "" },
-    { sr: 19, char: "Arrow Mark Punch", spec: "For Check Same plane", mode: "Visual", vals: obs.arrowMark, status: allOk, remark: "" },
-    { sr: 20, char: "Ensure Greasing at All Arms Of UJ", spec: "AS per control plan", mode: "Visual", vals: obs.grease, status: allOk, remark: "" },
-    { sr: 21, char: "Rust free", spec: "No Rust allow on prop shaft", mode: "Visual", vals: obs.rustFree, status: allOk, remark: "" },
-    { sr: 22, char: "Drill Hole (4 nos) (Both Side)", spec: "AS per control plan", mode: "Checking Pin /Round plug Gauge", vals: obs.drillHole, status: allOk, remark: "Incoming control (Checked on Sampling plan)" },
-    { sr: 23, char: "PCD (Both Side)", spec: "AS per control plan", mode: "Checking Fixture", vals: obs.pcd, status: allOk, remark: "Incoming control (Checked on Sampling plan)" },
-    { sr: 24, char: "Tube OD", spec: "AS per control plan", mode: "Vernier/snap gauge", vals: obs.tubeOd, status: allOk, remark: "" },
-    { sr: 25, char: "Deadener available", spec: "AS per control plan", mode: "Sound detect", vals: obs.deadener, status: allOk, remark: "" },
+    { sr: 17, char: "Proper Seating of Balancing Weight Condition On Tube", spec: "Proper setting", mode: "Visual Checked By hammer", vals: obs.balancingWeight, status: allOk, remark: "" },
+    { sr: 18, char: "Grease Nipple Condition & Status", spec: "No freeness and loose", mode: "Visual", vals: obs.grease, status: allOk, remark: "" },
+    { sr: 19, char: "Ensure Greasing at All Arms Of UJ", spec: "As per control plan", mode: "Visual", vals: obs.grease, status: allOk, remark: "" },
+    { sr: 20, char: "Mounting Hole Centre Distances", spec: "As per control plan", mode: "Vernier/ Checking Fixture", vals: obs.mountingHoleDist, status: allOk, remark: "As per control plan" },
+    { sr: 21, char: "Flange yoke Serration teeth (Ø180/Ø150/Ø120, 4-holes)", spec: "As per control plan", mode: "Mating Part", vals: obs.flangeYoke, status: allOk, remark: "As per control plan" },
+    { sr: 22, char: "PCD (Both Side) Drill Hole (4 nos)", spec: "As per control plan", mode: "Checking Fixture/Round plug Gauge", vals: obs.drillHole, status: allOk, remark: "Incoming control (Checked on Sampling plan)" },
+    { sr: 23, char: "PCD", spec: "As per control plan", mode: "Checking Fixture", vals: obs.pcd, status: allOk, remark: "Incoming control (Checked on Sampling plan)" },
+    { sr: 24, char: "Tube OD", spec: "As per control plan", mode: "Vernier /snap gauge", vals: obs.tubeOd, status: allOk, remark: "" },
+    { sr: 25, char: "Deadener available", spec: "As per control plan", mode: "Sound detect", vals: obs.deadener, status: allOk, remark: "" },
   ];
 
   rows.forEach((row, idx) => {
@@ -879,54 +779,7 @@ function downloadShiftPDF(
 
   const obsColHeaders = Array.from({ length: sampleCount }, (_, i) => i + 1);
 
-  let rows: { sr: number; char: string; spec: string; mode: string; vals: (string | number)[]; remark: string }[] = [];
-
-  const baseRows = [
-    { sr: 1, char: "Tube Length", spec: "AS per control plan", mode: "Measuring Tape", vals: obs.tubeLength, remark: "Checked in process/poka yoke Control" },
-    { sr: 2, char: "Matching of Tube Length in QR Code/Bar code Sticker & actual", spec: "Match tube length with QR/BarCode Sticker", mode: "Visual", vals: obs.tubeLengthMatch, remark: "" },
-    { sr: 3, char: "QR Code/ Bar Code Sticker Proper Scanning", spec: "Checked Part Number, Drawing Modification no and date", mode: "Barcode/ QR Code Scanner", vals: obs.scannedText, remark: "" },
-    { sr: 4, char: "Total Flange to Flange Length (Closed)", spec: "AS per control plan", mode: "Measuring Tape", vals: obs.totalFlange, remark: "Checked in process/poka yoke Control" },
-  ];
-
-  if (report.partType === "FRONT") {
-    rows = [
-      ...baseRows,
-      { sr: 5, char: "Front End Piece Details", spec: spec?.frontEndPieceDetails || "As per CP", mode: "Visual", vals: obs.frontEndPiece || [], remark: "" },
-      { sr: 6, char: "FEP Press H Stock Positions", spec: spec?.fepPressHStockPositions || "As per CP", mode: "Visual/Gauge", vals: obs.fepPressH || [], remark: "" },
-    ];
-  } else if (report.partType === "MIDDLE") {
-    rows = [
-      ...baseRows,
-      { sr: 5, char: "Flange Yoke Details", spec: spec?.mountingDetailsFlangeYoke || "As per CP", mode: "Visual", vals: obs.flangeYoke || [], remark: "" },
-      { sr: 6, char: "Coupling Flange Details", spec: spec?.mountingDetailsCouplingFlange || "As per CP", mode: "Visual", vals: obs.couplingFlange || [], remark: "" },
-    ];
-  } else {
-    rows = [...baseRows];
-  }
-
-  const visualRows = [
-    { sr: rows.length + 1, char: "Slide Joint Opening", spec: "As per requirement", mode: "Visual/Gauge", vals: obs.slideJoint, remark: "" },
-    { sr: rows.length + 2, char: "Long Fork Slide Movement", spec: "Smooth Slide Movement", mode: "Hand Feel", vals: obs.longFork, remark: "" },
-    { sr: rows.length + 3, char: "Coupling Flange Orientations", spec: "Aligned (Mounting Hole)", mode: "Visual", vals: obs.couplingOrient, remark: "" },
-    { sr: rows.length + 4, char: "UJ Movement (Smooth)", spec: "Proper And Equal Freeness", mode: "Hand Feel", vals: obs.ujMovement, remark: "" },
-    { sr: rows.length + 5, char: "Circlip Seating/ Circlip Missing", spec: "No circlip missing", mode: "Visual", vals: obs.circlip, remark: "" },
-    { sr: rows.length + 6, char: "No paint missing at UJ Area", spec: "No paint in slip joint area", mode: "Visual", vals: obs.paint, remark: "" },
-    { sr: rows.length + 7, char: "Paint Condition", spec: "No Run Down/Blisters", mode: "Visual", vals: obs.paintCondition, remark: "" },
-    { sr: rows.length + 8, char: "Anti Rust Oil @ Machining Area", spec: "No anti rust oil missing", mode: "Visual", vals: obs.antiRust, remark: "" },
-    { sr: rows.length + 9, char: "Proper Adhesion on Painted Surface", spec: "No Paint peel off", mode: "Visual", vals: obs.paintAdhesion, remark: "" },
-    { sr: rows.length + 10, char: "No Welding Defect", spec: "No blow hole, porosity, spatter", mode: "Visual", vals: obs.welding, remark: "" },
-    { sr: rows.length + 11, char: "Balancing Weight Seating", spec: "Proper setting", mode: "Visual", vals: obs.balancingWeight, remark: "" },
-    { sr: rows.length + 12, char: "Grease Nipple Condition", spec: "No freeness and loose", mode: "Visual", vals: Array.from({ length: sampleCount }, () => "OK"), remark: "" },
-    { sr: rows.length + 13, char: "Arrow Mark Punch", spec: "For Check Same plane", mode: "Visual", vals: obs.arrowMark, remark: "" },
-    { sr: rows.length + 14, char: "Ensure Greasing at All Arms Of UJ", spec: "AS per control plan", mode: "Visual", vals: obs.grease, remark: "" },
-    { sr: rows.length + 15, char: "Rust free", spec: "No Rust allow on prop shaft", mode: "Visual", vals: obs.rustFree, remark: "" },
-    { sr: rows.length + 16, char: "Drill Hole (4 nos) (Both Side)", spec: "AS per control plan", mode: "Checking Pin", vals: obs.drillHole, remark: "Incoming control" },
-    { sr: rows.length + 17, char: "PCD (Both Side)", spec: "AS per control plan", mode: "Checking Fixture", vals: obs.pcd, remark: "Incoming control" },
-    { sr: rows.length + 18, char: "Tube OD", spec: "AS per control plan", mode: "Vernier/snap gauge", vals: obs.tubeOd, remark: "" },
-    { sr: rows.length + 19, char: "Deadener available", spec: "AS per control plan", mode: "Sound detect", vals: obs.deadener, remark: "" },
-  ];
-
-  rows = [...rows, ...visualRows];
+  const rows = getPDIRows(report.partType, obs, sampleCount);
 
   const tableRowsHtml = rows.map((r, i) => {
     const bg = i % 2 === 0 ? "#fff" : "#f7f9ff";
@@ -947,82 +800,101 @@ function downloadShiftPDF(
 
   const obsHeaders = obsColHeaders.map(n => `<th style="width:60px;text-align:center;padding:5px;font-size:9px">${n}</th>`).join("");
 
-  const html = `<!DOCTYPE html>
-<html><head><meta charset="UTF-8">
-<title>PDI_${report.partType}_${report.partNumber}_${shiftLetter}_${dispatchDate}</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 10px; color: #000; }
-  @media print { body { margin: 0; } @page { size: A3 landscape; margin: 10mm; } }
-  table { border-collapse: collapse; width: 100%; }
-  th { background: #1F3864; color: #fff; font-size: 10px; padding: 6px; }
-  .header-row { background: #1F3864; color: #fff; text-align: center; padding: 6px; font-weight: bold; }
-  .info-row { background: #f2f2f2; padding: 4px 6px; font-size: 10px; }
-</style>
-</head><body>
-  <table>
-    <tr><td colspan="12" class="header-row" style="font-size:14px">PRE DISPATCH INSPECTION CHECK SHEET ['${report.partType}']</td></tr>
-    <tr><td colspan="12" class="header-row" style="font-size:12px">RSB TRANSMISSIONS (I)LTD , LUCKNOW</td></tr>
-    <tr>
-      <td colspan="3" class="info-row"><b>DESCRIPTION:</b> ${spec?.partDescription || report.partNumber}</td>
-      <td colspan="2" class="info-row"></td>
-      <td class="info-row"><b>Shift:</b></td>
-      <td class="info-row" style="background:#ffff00;font-weight:bold;text-align:center">${shiftLetter}</td>
-      <td class="info-row"></td><td class="info-row"></td>
-      <td class="info-row"><b>Part No:</b></td>
-      <td colspan="2" class="info-row" style="background:#ffff00;font-weight:bold;color:#1F3864">${report.partNumber}</td>
-    </tr>
-    <tr>
-      <td colspan="3" class="info-row"><b>Drg. No:</b> ${spec?.drawingNumber || "#"}</td>
-      <td colspan="2" class="info-row"></td>
-      <td class="info-row"><b>Mode No:</b></td>
-      <td class="info-row" style="background:#ffff00;font-weight:bold;text-align:center">${spec?.revNo || "#"}</td>
-      <td colspan="2" class="info-row"></td>
-      <td class="info-row"><b>Invoice No.:</b></td>
-      <td colspan="2" class="info-row"></td>
-    </tr>
-    <tr>
-      <td colspan="3" class="info-row">Regular- Sample-</td>
-      <td class="info-row"></td>
-      <td class="info-row"><b>QTY:</b> ${shiftGroup.qty}</td>
-      <td class="info-row"><b>Sample Size:</b></td>
-      <td class="info-row" style="background:#ffff00;text-align:center">${sampleCount}</td>
-      <td colspan="2" class="info-row"></td>
-      <td class="info-row"><b>Supply Date:</b></td>
-      <td colspan="2" class="info-row" style="background:#ffff00">${dispatchDate}</td>
-    </tr>
-    <tr>
-      <th>SR NO.</th>
-      <th colspan="2">Characteristics</th>
-      <th>Specification</th>
-      <th>Mode Of Checking</th>
-      ${obsHeaders}
-      <th>Product Status</th>
-      <th>Remark</th>
-    </tr>
-    <tr>
-      <th></th><th colspan="2"></th><th></th><th></th>
-      ${obsColHeaders.map(n => `<th style="text-align:center;padding:5px;font-size:9px">${n}</th>`).join("")}
-      <th></th><th></th>
-    </tr>
-    ${tableRowsHtml}
-    <tr><td colspan="12" style="padding:4px 6px;border:1px solid #ccc;font-size:9px;background:#f2f2f2"><b>Remarks :- (IF ANY)</b></td></tr>
-    <tr>
-      <td colspan="3" style="padding:6px;border:1px solid #ccc;font-size:10px;background:#f2f2f2"><b>CHECKED BY (SIGNATURE):- ${shiftGroup.checkedBy || ""}</b></td>
-      <td style="padding:6px;border:1px solid #ccc;font-size:10px;background:#f2f2f2"><b>Date</b></td>
-      <td style="padding:6px;border:1px solid #ccc;font-size:10px;background:#ffff00">${dispatchDate}</td>
-      <td colspan="4" style="border:1px solid #ccc"></td>
-      <td colspan="3" style="padding:6px;border:1px solid #ccc;font-size:10px;background:#f2f2f2"><b>PASSED DISPATCH (SIGNATURE): SUDHIR</b></td>
-    </tr>
-    <tr><td colspan="12" style="padding:4px 6px;border:1px solid #ccc;font-size:9px;background:#f2f2f2">FORM NO :</td></tr>
-  </table>
-</body></html>`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; color: #000; width: 1400px; padding: 20px; background: white;">
+      <style>
+        table { border-collapse: collapse; width: 100%; }
+        th { background: #1F3864; color: #fff; font-size: 10px; padding: 6px; border: 1px solid #ccc; }
+        .header-row { background: #1F3864; color: #fff; text-align: center; padding: 6px; font-weight: bold; border: 1px solid #ccc; }
+        .info-row { background: #f2f2f2; padding: 4px 6px; font-size: 10px; border: 1px solid #ccc; }
+        td { border: 1px solid #ccc; }
+      </style>
+      <table>
+        <tr><td colspan="12" class="header-row" style="font-size:14px">PRE DISPATCH INSPECTION CHECK SHEET ['${report.partType}']</td></tr>
+        <tr><td colspan="12" class="header-row" style="font-size:12px">RSB TRANSMISSIONS (I)LTD , LUCKNOW</td></tr>
+        <tr>
+          <td colspan="3" class="info-row"><b>DESCRIPTION:</b> ${spec?.partDescription || report.partNumber}</td>
+          <td colspan="2" class="info-row"></td>
+          <td class="info-row"><b>Shift:</b></td>
+          <td class="info-row" style="background:#ffff00;font-weight:bold;text-align:center">${shiftLetter}</td>
+          <td class="info-row"></td><td class="info-row"></td>
+          <td class="info-row"><b>Part No:</b></td>
+          <td colspan="2" class="info-row" style="background:#ffff00;font-weight:bold;color:#1F3864">${report.partNumber}</td>
+        </tr>
+        <tr>
+          <td colspan="3" class="info-row"><b>Drg. No:</b> ${spec?.drawingNumber || "#"}</td>
+          <td colspan="2" class="info-row"></td>
+          <td class="info-row"><b>Mode No:</b></td>
+          <td class="info-row" style="background:#ffff00;font-weight:bold;text-align:center">${spec?.revNo || "#"}</td>
+          <td colspan="2" class="info-row"></td>
+          <td class="info-row"><b>Invoice No.:</b></td>
+          <td colspan="2" class="info-row"></td>
+        </tr>
+        <tr>
+          <td colspan="3" class="info-row">Regular- Sample-</td>
+          <td class="info-row"></td>
+          <td class="info-row"><b>QTY:</b> ${shiftGroup.qty}</td>
+          <td class="info-row"><b>Sample Size:</b></td>
+          <td class="info-row" style="background:#ffff00;text-align:center">${sampleCount}</td>
+          <td colspan="2" class="info-row"></td>
+          <td class="info-row"><b>Supply Date:</b></td>
+          <td colspan="2" class="info-row" style="background:#ffff00">${dispatchDate}</td>
+        </tr>
+        <tr>
+          <th>SR NO.</th>
+          <th colspan="2">Characteristics</th>
+          <th>Specification</th>
+          <th>Mode Of Checking</th>
+          ${obsHeaders}
+          <th>Product Status</th>
+          <th>Remark</th>
+        </tr>
+        <tr>
+          <th></th><th colspan="2"></th><th></th><th></th>
+          ${obsColHeaders.map(n => `<th style="text-align:center;padding:5px;font-size:9px">${n}</th>`).join("")}
+          <th></th><th></th>
+        </tr>
+        ${tableRowsHtml}
+        <tr><td colspan="12" style="padding:4px 6px;border:1px solid #ccc;font-size:9px;background:#f2f2f2"><b>Remarks :- (IF ANY)</b></td></tr>
+        <tr>
+          <td colspan="3" style="padding:6px;border:1px solid #ccc;font-size:10px;background:#f2f2f2"><b>CHECKED BY (SIGNATURE):- ${shiftGroup.checkedBy || ""}</b></td>
+          <td style="padding:6px;border:1px solid #ccc;font-size:10px;background:#f2f2f2"><b>Date</b></td>
+          <td style="padding:6px;border:1px solid #ccc;font-size:10px;background:#ffff00">${dispatchDate}</td>
+          <td colspan="4" style="border:1px solid #ccc"></td>
+          <td colspan="3" style="padding:6px;border:1px solid #ccc;font-size:10px;background:#f2f2f2"><b>PASSED DISPATCH (SIGNATURE): SUDHIR</b></td>
+        </tr>
+        <tr><td colspan="12" style="padding:4px 6px;border:1px solid #ccc;font-size:9px;background:#f2f2f2">FORM NO :</td></tr>
+      </table>
+    </div>`;
 
-  const win = window.open("", "_blank");
-  if (!win) { toast.error("Popup blocked. Please allow popups."); return; }
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  setTimeout(() => { win.print(); }, 500);
+  const container = document.createElement("div");
+  container.innerHTML = html;
+  container.style.position = "absolute";
+  container.style.top = "-9999px";
+  container.style.left = "-9999px";
+  document.body.appendChild(container);
+
+  setTimeout(async () => {
+    try {
+      const canvas = await html2canvas(container.firstElementChild as HTMLElement, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+      });
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a3" });
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      pdf.addImage(imgData, "PNG", 0, 10, pdfWidth, pdfHeight);
+      pdf.save(`PDI_${report.partType}_${report.partNumber}_${shiftLetter}_${dispatchDate}.pdf`);
+      toast.success("PDF downloaded successfully");
+    } catch (err) {
+      console.error("PDF generation failed", err);
+      toast.error("Failed to generate PDF");
+    } finally {
+      document.body.removeChild(container);
+    }
+  }, 100);
 }
 
 // ─── File Card Component ──────────────────────────────────────────────────────
@@ -1294,7 +1166,6 @@ export default function PDIPartReportPage() {
       setDownloading(`pdf_${key}`);
       try {
         downloadShiftPDF(shift, report, date);
-        toast.success("PDF print dialog opened!");
       } catch (e) {
         toast.error("Failed to generate PDF.");
         console.error(e);

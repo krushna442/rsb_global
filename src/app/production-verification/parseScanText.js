@@ -95,7 +95,7 @@ function isF4(text) {
  * F6 is distinguished from F1 after parsing by the presence of a hyphen in the vendor code.
  */
 function isF1orF6(text) {
-  return /rev\s*no\s*#/i.test(text) && !text.includes('$');
+  return /rev\s*no\s*/i.test(text) && !text.includes('$');
 }
 
 /**
@@ -138,9 +138,9 @@ function isF3(text) {
  * based on whether the vendor code contains a hyphen.
  */
 function parseF1core(text) {
-  // Match: PART_NO + "Rev No#" + optional_rev_digits + space? + REST
+  // Match: PART_NO + "Rev No" + optional '#' + optional_rev_digits + space? + REST
   // REST = VENDOR + MM(2) + YY(2) + SL(6)
-  const match = text.match(/^(.+?)\s*[Rr]ev\s*[Nn]o\s*#([^\s]*)\s*(.+)$/);
+  const match = text.match(/^(.+?)\s*rev\s*no\s*#?([^\s]*)\s*(.+)$/i);
   if (!match) return null;
 
   const partNo    = match[1].trim();

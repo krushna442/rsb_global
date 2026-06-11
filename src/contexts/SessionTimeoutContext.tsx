@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from "react";
 import { useUser } from "@/contexts/UserContext";
+import { usePathname } from "next/navigation";
 
 interface SessionTimeoutContextType {
   resetSession: () => void;
@@ -11,12 +12,23 @@ const SessionTimeoutContext = createContext<SessionTimeoutContextType | undefine
 
 export function SessionTimeoutProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, logout } = useUser();
+  const pathname = usePathname();
+  
   const [showModal, setShowModal] = useState(false);
   const [countdown, setCountdown] = useState(10);
 
   const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const showModalRef = useRef(false);
+
+  // Excluded paths from session timeout
+  const excludedPaths = [
+    "/hourly-production",
+    "/bearing-cup-plan",
+    "/despatch-plan",
+    "/skill-matrix"
+  ];
+  const isExcluded = pathname && excludedPaths.some(p => pathname.startsWith(p));
 
   // Sync ref with state to prevent stale closures in event listeners without re-binding them
   showModalRef.current = showModal;
@@ -32,7 +44,7 @@ export function SessionTimeoutProvider({ children }: { children: ReactNode }) {
     inactivityTimerRef.current = setTimeout(() => {
       setShowModal(true);
       setCountdown(10);
-    }, 15 * 60 * 1000);
+    }, 10 * 60 * 1000);
   }, []);
 
   const handleKeepSession = useCallback(() => {
@@ -42,7 +54,7 @@ export function SessionTimeoutProvider({ children }: { children: ReactNode }) {
 
   // Handle countdown interval when modal opens
   useEffect(() => {
-    if (showModal) {
+    if (showModal && !isExcluded) {
       if (inactivityTimerRef.current) {
         clearTimeout(inactivityTimerRef.current);
       }
@@ -62,6 +74,9 @@ export function SessionTimeoutProvider({ children }: { children: ReactNode }) {
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
       }
+      if (isExcluded) {
+        setShowModal(false);
+      }
     }
 
     return () => {
@@ -69,12 +84,12 @@ export function SessionTimeoutProvider({ children }: { children: ReactNode }) {
         clearInterval(countdownIntervalRef.current);
       }
     };
-  }, [showModal, logout]);
+  }, [showModal, logout, isExcluded]);
 
   // Setup user interaction event listeners when authenticated
   useEffect(() => {
-    if (!isAuthenticated) {
-      // Clear everything if user logs out
+    if (!isAuthenticated || isExcluded) {
+      // Clear everything if user logs out or is on an excluded page
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       setShowModal(false);
@@ -108,7 +123,7 @@ export function SessionTimeoutProvider({ children }: { children: ReactNode }) {
       });
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     };
-  }, [isAuthenticated, resetInactivityTimer]);
+  }, [isAuthenticated, resetInactivityTimer, isExcluded]);
 
   return (
     <SessionTimeoutContext.Provider value={{ resetSession: handleKeepSession }}>
