@@ -1,4 +1,5 @@
 "use client";
+import { DatePickerInput } from "@/components/ui/date-picker-input";
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
@@ -1064,7 +1065,7 @@ export function ProductForm({ isEdit = false, productId, initialData, isPopup = 
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="supplyDate" className="text-xs font-medium">Supply Date</Label>
-                                    <Input id="supplyDate" name="supplyDate" value={formData.supplyDate || ""} onChange={handleChange} type="date" className="h-9 text-sm" />
+                                    <DatePickerInput id="supplyDate" name="supplyDate" value={formData.supplyDate || ""} onChange={handleChange}   className="h-9 text-sm" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="sampleStatus" className="text-xs font-medium">Sample Status</Label>
@@ -1096,7 +1097,7 @@ export function ProductForm({ isEdit = false, productId, initialData, isPopup = 
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="acceptedMailDate" className="text-xs font-medium">Accepted Mail Date</Label>
-                                    <Input id="acceptedMailDate" name="acceptedMailDate" value={formData.acceptedMailDate || ""} onChange={handleChange} type="date" className="h-9 text-sm" />
+                                    <DatePickerInput id="acceptedMailDate" name="acceptedMailDate" value={formData.acceptedMailDate || ""} onChange={handleChange}   className="h-9 text-sm" />
                                 </div>
                             </div>
                         </CardContent>
@@ -1119,7 +1120,7 @@ export function ProductForm({ isEdit = false, productId, initialData, isPopup = 
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 <div className="space-y-1.5">
                                     <Label htmlFor="trsoDate" className="text-xs font-medium">TRSO Date</Label>
-                                    <Input id="trsoDate" name="trsoDate" value={formData.trsoDate || ""} onChange={handleChange} type="date" className="h-9 text-sm" />
+                                    <DatePickerInput id="trsoDate" name="trsoDate" value={formData.trsoDate || ""} onChange={handleChange}   className="h-9 text-sm" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="trsoModel" className="text-xs font-medium">TRSO Model</Label>
@@ -1150,7 +1151,7 @@ export function ProductForm({ isEdit = false, productId, initialData, isPopup = 
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 <div className="space-y-1.5">
                                     <Label htmlFor="iqaDate" className="text-xs font-medium">IQA Date</Label>
-                                    <Input id="iqaDate" name="iqaDate" value={formData.iqaDate || ""} onChange={handleChange} type="date" className="h-9 text-sm" />
+                                    <DatePickerInput id="iqaDate" name="iqaDate" value={formData.iqaDate || ""} onChange={handleChange}   className="h-9 text-sm" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="iqaModel" className="text-xs font-medium">IQA Model</Label>
@@ -1162,11 +1163,11 @@ export function ProductForm({ isEdit = false, productId, initialData, isPopup = 
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="ppapIntimateDate" className="text-xs font-medium">PPAP Intimate Date</Label>
-                                    <Input id="ppapIntimateDate" name="ppapIntimateDate" value={formData.ppapIntimateDate || ""} onChange={handleChange} type="date" className="h-9 text-sm" />
+                                    <DatePickerInput id="ppapIntimateDate" name="ppapIntimateDate" value={formData.ppapIntimateDate || ""} onChange={handleChange}   className="h-9 text-sm" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="ppapClosingDate" className="text-xs font-medium">PPAP Closing Date</Label>
-                                    <Input id="ppapClosingDate" name="ppapClosingDate" value={formData.ppapClosingDate || ""} onChange={handleChange} type="date" className="h-9 text-sm" />
+                                    <DatePickerInput id="ppapClosingDate" name="ppapClosingDate" value={formData.ppapClosingDate || ""} onChange={handleChange}   className="h-9 text-sm" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="ppapStatus" className="text-xs font-medium">PPAP Status</Label>

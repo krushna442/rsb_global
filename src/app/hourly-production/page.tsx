@@ -1,4 +1,5 @@
 "use client";
+import { DatePickerInput } from "@/components/ui/date-picker-input";
 
 import React, {
   useState,
@@ -676,8 +677,7 @@ export default function HourlyProductionPage() {
               <>
                 <div className="flex items-center gap-2 bg-white border rounded-md px-3 py-1.5 shadow-sm">
                   <CalendarIcon className="w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="date"
+                  <DatePickerInput  
                     className="text-sm border-none bg-transparent outline-none cursor-pointer"
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
@@ -1307,8 +1307,7 @@ export default function HourlyProductionPage() {
                     <span className="text-indigo-100 text-xs font-medium">
                       From
                     </span>
-                    <input
-                      type="date"
+                    <DatePickerInput  
                       value={tlFrom}
                       onChange={(e) => setTlFrom(e.target.value)}
                       className="text-xs bg-transparent text-white border-none outline-none cursor-pointer w-24"
@@ -1318,8 +1317,7 @@ export default function HourlyProductionPage() {
                     <span className="text-indigo-100 text-xs font-medium">
                       To
                     </span>
-                    <input
-                      type="date"
+                    <DatePickerInput  
                       value={tlTo}
                       onChange={(e) => setTlTo(e.target.value)}
                       className="text-xs bg-transparent text-white border-none outline-none cursor-pointer w-24"

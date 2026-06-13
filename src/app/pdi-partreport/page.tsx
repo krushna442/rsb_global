@@ -1,4 +1,5 @@
 "use client";
+import { DatePickerInput } from "@/components/ui/date-picker-input";
 
 import React, { useState, useCallback } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -1237,11 +1238,11 @@ export default function PDIPartReportPage() {
               </div>
               <div>
                 <label className="label-text">From Date</label>
-                <input className="input-field" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+                <DatePickerInput className="input-field"   value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
               </div>
               <div>
                 <label className="label-text">To Date</label>
-                <input className="input-field" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+                <DatePickerInput className="input-field"   value={toDate} onChange={(e) => setToDate(e.target.value)} />
               </div>
               <button className="btn-primary" onClick={fetchReport} disabled={loading}>
                 {loading ? <><Spinner /> Fetching…</> : <><span>⌕</span> Fetch Report</>}

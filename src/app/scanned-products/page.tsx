@@ -1,4 +1,5 @@
 "use client";
+import { DatePickerInput } from "@/components/ui/date-picker-input";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -897,15 +898,13 @@ const date = new Date(raw.replace("Z", ""));
                         {/* Custom date range */}
                         {dateFilter === "custom" && (
                             <div className="flex items-center gap-2">
-                                <Input
-                                    type="date"
+                                <DatePickerInput  
                                     className="h-9 text-sm w-[130px] bg-white border border-input rounded-md px-3"
                                     value={fromDate}
                                     onChange={(e) => setFromDate(e.target.value)}
                                 />
                                 <span className="text-muted-foreground text-xs font-medium">to</span>
-                                <Input
-                                    type="date"
+                                <DatePickerInput  
                                     className="h-9 text-sm w-[130px] bg-white border border-input rounded-md px-3"
                                     value={toDate}
                                     onChange={(e) => setToDate(e.target.value)}

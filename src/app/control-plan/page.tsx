@@ -1,4 +1,5 @@
 "use client";
+import { DatePickerInput } from "@/components/ui/date-picker-input";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -330,7 +331,7 @@ function PlanModal({ open, onClose, editPlan, onSaved, lines, onRefreshOptions }
           <div><label className="text-xs font-semibold text-muted-foreground">Sequence Number</label><Input type="number" value={sequenceNo} onChange={e => setSequenceNo(e.target.value === "" ? "" : Number(e.target.value))} className="mt-1" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-semibold text-muted-foreground">Rev No</label><Input value={revNo} onChange={e => setRevNo(e.target.value)} className="mt-1" /></div>
-            <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><Input type="date" value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
+            <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><DatePickerInput   value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
           </div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground">Language</label>
@@ -391,7 +392,7 @@ function NewVersionModal({ plan, onClose, onSaved }: { plan: ControlPlan | null;
         <div className="space-y-3 mt-2">
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-semibold text-muted-foreground">Rev No</label><Input value={revNo} onChange={e => setRevNo(e.target.value)} className="mt-1" /></div>
-            <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><Input type="date" value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
+            <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><DatePickerInput   value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
           </div>
           <div><label className="text-xs font-semibold text-muted-foreground">Remarks <span className="text-amber-600">(required)</span></label><Textarea value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Describe changes in this new version (one per line)..." className="mt-1 text-xs border-amber-300 focus:border-amber-500" /></div>
           <div><label className="text-xs font-semibold text-muted-foreground">File *</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => setFile(e.target.files?.[0] || null)} className="mt-1 block text-sm" /></div>

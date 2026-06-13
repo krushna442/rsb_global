@@ -1,4 +1,5 @@
 "use client";
+import { DatePickerInput } from "@/components/ui/date-picker-input";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -153,7 +154,7 @@ function StandardModal({ open, onClose, editStandard, onSaved, categories, onRef
           </div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground">Rev Date</label>
-            <Input type="date" value={form.rev_date} onChange={e => setForm(f => ({ ...f, rev_date: e.target.value }))} className="mt-1" />
+            <DatePickerInput   value={form.rev_date} onChange={e => setForm(f => ({ ...f, rev_date: e.target.value }))} className="mt-1" />
           </div>
           <div className="col-span-2">
             <label className="text-xs font-semibold text-muted-foreground">Comment</label>
@@ -240,7 +241,7 @@ function NewVersionModal({ standard, onClose, onSaved }: { standard: Standard | 
         <div className="space-y-3 mt-3">
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-semibold text-muted-foreground">Rev Number</label><Input value={revNo} onChange={e => setRevNo(e.target.value)} className="mt-1" /></div>
-            <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><Input type="date" value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
+            <div><label className="text-xs font-semibold text-muted-foreground">Rev Date</label><DatePickerInput   value={revDate} onChange={e => setRevDate(e.target.value)} className="mt-1" /></div>
           </div>
           <div><label className="text-xs font-semibold text-muted-foreground">Comment</label><Input value={comment} onChange={e => setComment(e.target.value)} className="mt-1" /></div>
           <div><label className="text-xs font-semibold text-muted-foreground">Remarks <span className="text-amber-600">(required)</span></label><Textarea value={remarks} onChange={e => setRemarks(e.target.value)} className="mt-1 text-xs" placeholder="Describe changes in this new version (one per line)..." /></div>

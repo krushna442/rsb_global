@@ -1,4 +1,5 @@
 "use client";
+import { DatePickerInput } from "@/components/ui/date-picker-input";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -438,8 +439,7 @@ const addJtRow = () => {
               <>
             <div className="flex items-center gap-2 bg-white border rounded-md px-3 py-1.5 shadow-sm">
               <CalendarIcon className="w-4 h-4 text-muted-foreground" />
-              <input
-                type="date"
+              <DatePickerInput  
                 className="text-sm border-none bg-transparent outline-none cursor-pointer"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
@@ -947,11 +947,11 @@ function GraphsTab() {
       <div className="flex flex-wrap items-end gap-3 bg-white border rounded-xl p-4 shadow-sm">
         <div>
           <label className="text-xs font-semibold text-muted-foreground block mb-1">From Date</label>
-          <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="h-9 text-sm w-40" />
+          <DatePickerInput   value={from} onChange={e => setFrom(e.target.value)} className="h-9 text-sm w-40" />
         </div>
         <div>
           <label className="text-xs font-semibold text-muted-foreground block mb-1">To Date</label>
-          <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="h-9 text-sm w-40" />
+          <DatePickerInput   value={to} onChange={e => setTo(e.target.value)} className="h-9 text-sm w-40" />
         </div>
         <Button size="sm" className="h-9 text-xs gap-1.5" onClick={loadGraph} disabled={loading}>
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BarChart2 className="w-3.5 h-3.5" />}
@@ -1000,16 +1000,14 @@ function GraphsTab() {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5 bg-white/15 rounded-md px-2 py-1">
               <span className="text-violet-100 text-xs font-medium">From</span>
-              <input
-                type="date" value={jtFrom}
+              <DatePickerInput   value={jtFrom}
                 onChange={e => setJtFrom(e.target.value)}
                 className="text-xs bg-transparent text-white border-none outline-none cursor-pointer"
               />
             </div>
             <div className="flex items-center gap-1.5 bg-white/15 rounded-md px-2 py-1">
               <span className="text-violet-100 text-xs font-medium">To</span>
-              <input
-                type="date" value={jtTo}
+              <DatePickerInput   value={jtTo}
                 onChange={e => setJtTo(e.target.value)}
                 className="text-xs bg-transparent text-white border-none outline-none cursor-pointer"
               />

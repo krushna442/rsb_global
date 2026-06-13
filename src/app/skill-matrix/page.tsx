@@ -1,4 +1,5 @@
 "use client";
+import { DatePickerInput } from "@/components/ui/date-picker-input";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -174,8 +175,8 @@ function PersonModal({ open, onClose, editPerson, machineId, onSaved }: {
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-semibold text-muted-foreground">Full Name *</label><Input value={name} onChange={e => setName(e.target.value)} className="mt-1" /></div>
             <div><label className="text-xs font-semibold text-muted-foreground">Department</label><Input value={dept} onChange={e => setDept(e.target.value)} className="mt-1" /></div>
-            <div><label className="text-xs font-semibold text-muted-foreground">Date of Joining</label><Input type="date" value={doj} onChange={e => setDoj(e.target.value)} className="mt-1" /></div>
-            <div><label className="text-xs font-semibold text-muted-foreground">Last Skill Update</label><Input type="date" value={lastUpd} onChange={e => setLastUpd(e.target.value)} className="mt-1" /></div>
+            <div><label className="text-xs font-semibold text-muted-foreground">Date of Joining</label><DatePickerInput   value={doj} onChange={e => setDoj(e.target.value)} className="mt-1" /></div>
+            <div><label className="text-xs font-semibold text-muted-foreground">Last Skill Update</label><DatePickerInput   value={lastUpd} onChange={e => setLastUpd(e.target.value)} className="mt-1" /></div>
           </div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground">Skill Level</label>
